@@ -55,6 +55,8 @@
 - 产物：
   - `sds-mobile-debug-apk`
   - 内含 `app/build/outputs/apk/debug/` 下生成的 debug APK
+- 公开下载：
+  - workflow 也会自动创建 GitHub Release，并把 `sds-mobile-debug.apk` 作为 release asset 上传
 
 ## 参考的官方文档
 
