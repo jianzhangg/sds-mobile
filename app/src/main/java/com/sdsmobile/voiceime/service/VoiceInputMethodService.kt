@@ -2,18 +2,26 @@ package com.sdsmobile.voiceime.service
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Rect
+import android.graphics.drawable.ColorDrawable
 import android.inputmethodservice.InputMethodService
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.WindowInsets
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 import android.widget.FrameLayout
-import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.sdsmobile.voiceime.R
 import com.sdsmobile.voiceime.VoiceImeApplication
@@ -25,8 +33,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 class VoiceInputMethodService : InputMethodService() {
+    private val windowManager by lazy {
+        getSystemService(WindowManager::class.java)
+    }
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val appContainer by lazy {
         (application as VoiceImeApplication).appContainer
@@ -37,17 +49,17 @@ class VoiceInputMethodService : InputMethodService() {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private lateinit var rootView: FrameLayout
-    private lateinit var bubbleContainer: LinearLayout
-    private lateinit var statusView: TextView
     private lateinit var bubbleButton: TextView
+    private var popupContentView: View? = null
+    private var bubblePopup: PopupWindow? = null
     private var recognizer: DoubaoSpeechRecognizer? = null
     private var state: ImePanelState = ImePanelState.Idle()
-    private var bubbleTranslationX = 0f
-    private var bubbleTranslationY = 0f
+    private var bubblePositionX = 0f
+    private var bubblePositionY = 0f
     private var touchStartRawX = 0f
     private var touchStartRawY = 0f
-    private var touchStartTranslationX = 0f
-    private var touchStartTranslationY = 0f
+    private var touchStartBubbleX = 0f
+    private var touchStartBubbleY = 0f
     private var hasMovedDuringTouch = false
     private var hasLongPressed = false
     private val touchSlop by lazy { ViewConfiguration.get(this).scaledTouchSlop.toFloat() }
@@ -66,6 +78,7 @@ class VoiceInputMethodService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        dismissBubblePopup()
         recognizer?.destroy()
         recognizer = null
         serviceScope.cancel()
@@ -75,36 +88,29 @@ class VoiceInputMethodService : InputMethodService() {
     override fun onEvaluateFullscreenMode(): Boolean = false
 
     override fun onCreateInputView(): View {
-        val root = layoutInflater.inflate(R.layout.view_voice_ime, null)
-        rootView = root.findViewById(android.R.id.content) ?: root as FrameLayout
-        bubbleContainer = root.findViewById(R.id.ime_bubble_container)
-        statusView = root.findViewById(R.id.ime_status)
-        bubbleButton = root.findViewById(R.id.ime_bubble_button)
-
-        bubbleButton.setOnTouchListener { _, event ->
-            handleBubbleTouch(event)
-        }
-        root.post {
-            applySavedBubblePosition()
-        }
-
-        renderState(ImePanelState.Idle())
-        return root
+        rootView = layoutInflater.inflate(R.layout.view_voice_ime, null) as FrameLayout
+        return rootView
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         renderState(ImePanelState.Idle())
         rootView.post {
-            applySavedBubblePosition()
+            showBubblePopupIfNeeded()
         }
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         recognizer?.destroy()
         mainHandler.removeCallbacks(longPressRunnable)
+        dismissBubblePopup()
         renderState(ImePanelState.Idle())
         super.onFinishInputView(finishingInput)
+    }
+
+    override fun onWindowHidden() {
+        dismissBubblePopup()
+        super.onWindowHidden()
     }
 
     private fun handleBubbleTouch(event: MotionEvent): Boolean {
@@ -112,8 +118,8 @@ class VoiceInputMethodService : InputMethodService() {
             MotionEvent.ACTION_DOWN -> {
                 touchStartRawX = event.rawX
                 touchStartRawY = event.rawY
-                touchStartTranslationX = bubbleTranslationX
-                touchStartTranslationY = bubbleTranslationY
+                touchStartBubbleX = bubblePositionX
+                touchStartBubbleY = bubblePositionY
                 hasMovedDuringTouch = false
                 hasLongPressed = false
                 mainHandler.removeCallbacks(longPressRunnable)
@@ -124,14 +130,14 @@ class VoiceInputMethodService : InputMethodService() {
             MotionEvent.ACTION_MOVE -> {
                 val deltaX = event.rawX - touchStartRawX
                 val deltaY = event.rawY - touchStartRawY
-                if (!hasMovedDuringTouch && (kotlin.math.abs(deltaX) > touchSlop || kotlin.math.abs(deltaY) > touchSlop)) {
+                if (!hasMovedDuringTouch && (abs(deltaX) > touchSlop || abs(deltaY) > touchSlop)) {
                     hasMovedDuringTouch = true
                     mainHandler.removeCallbacks(longPressRunnable)
                 }
                 if (hasMovedDuringTouch) {
                     updateBubblePosition(
-                        touchStartTranslationX + deltaX,
-                        touchStartTranslationY + deltaY,
+                        touchStartBubbleX + deltaX,
+                        touchStartBubbleY + deltaY,
                     )
                 }
                 return true
@@ -172,7 +178,7 @@ class VoiceInputMethodService : InputMethodService() {
         val connection = currentInputConnection
         val snapshot = readCurrentEditorText(connection)
         if (snapshot == null || snapshot.text.isBlank()) {
-            renderState(ImePanelState.Error("当前输入框没有可修正文本"))
+            renderState(ImePanelState.Error("当前输入框没有可修正文案"))
             return
         }
 
@@ -187,7 +193,7 @@ class VoiceInputMethodService : InputMethodService() {
             val corrected = runCatching {
                 appContainer.arkTextCorrector.correctExistingText(snapshot.text, settings)
             }.getOrElse { error ->
-                renderState(ImePanelState.Error(error.message ?: "修正失败"))
+                renderState(ImePanelState.Error(error.message ?: "优化失败"))
                 return@launch
             }
 
@@ -338,33 +344,152 @@ class VoiceInputMethodService : InputMethodService() {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun applySavedBubblePosition() {
-        if (!::rootView.isInitialized || !::bubbleContainer.isInitialized) {
+    private fun showBubblePopupIfNeeded() {
+        if (!::rootView.isInitialized) {
             return
         }
+        val parentView = window?.window?.decorView ?: rootView
+        if (parentView.windowToken == null) {
+            return
+        }
+        ensureBubblePopup()
         maybeMigrateBubblePosition()
-        val availableWidth = (rootView.width - rootView.paddingLeft - rootView.paddingRight - bubbleContainer.width).coerceAtLeast(0)
-        val availableHeight = (rootView.height - rootView.paddingTop - rootView.paddingBottom - bubbleContainer.height).coerceAtLeast(0)
+        measurePopupContent()
+        val (savedX, savedY) = computeSavedBubblePosition()
+        bubblePositionX = savedX
+        bubblePositionY = savedY
+        val popup = bubblePopup ?: return
+        if (popup.isShowing) {
+            popup.update(savedX.toInt(), savedY.toInt(), -1, -1)
+        } else {
+            popup.showAtLocation(parentView, Gravity.TOP or Gravity.START, savedX.toInt(), savedY.toInt())
+        }
+        renderState(state)
+    }
+
+    private fun dismissBubblePopup() {
+        bubblePopup?.dismiss()
+    }
+
+    private fun ensureBubblePopup() {
+        if (bubblePopup != null && popupContentView != null) {
+            return
+        }
+
+        val contentView = layoutInflater.inflate(R.layout.view_voice_ime_overlay, null)
+        popupContentView = contentView
+        bubbleButton = contentView.findViewById(R.id.ime_bubble_button)
+        bubbleButton.setOnTouchListener { _, event ->
+            handleBubbleTouch(event)
+        }
+
+        bubblePopup = PopupWindow(
+            contentView,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            false,
+        ).apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            isTouchable = true
+            isFocusable = false
+            isOutsideTouchable = false
+            inputMethodMode = PopupWindow.INPUT_METHOD_NOT_NEEDED
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+            setAnimationStyle(0)
+            setSplitTouchEnabled(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                setAttachedInDecor(false)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                setIsLaidOutInScreen(true)
+                setTouchModal(false)
+            }
+        }
+    }
+
+    private fun measurePopupContent(): Pair<Int, Int> {
+        val contentView = popupContentView ?: return dpToPx(BUBBLE_SIZE_DP) to dpToPx(BUBBLE_SIZE_DP)
+        contentView.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val width = contentView.measuredWidth.takeIf { it > 0 } ?: dpToPx(BUBBLE_SIZE_DP)
+        val height = contentView.measuredHeight.takeIf { it > 0 } ?: dpToPx(BUBBLE_SIZE_DP)
+        return width to height
+    }
+
+    private fun computeSavedBubblePosition(): Pair<Float, Float> {
+        val screenBounds = getAvailableScreenBounds()
+        val (contentWidth, contentHeight) = measurePopupContent()
+        val minX = screenBounds.left.toFloat()
+        val minY = screenBounds.top.toFloat()
+        val maxX = (screenBounds.right - contentWidth).coerceAtLeast(screenBounds.left).toFloat()
+        val maxY = (screenBounds.bottom - contentHeight).coerceAtLeast(screenBounds.top).toFloat()
         val normalizedX = prefs.getFloat(KEY_BUBBLE_X, 1f)
         val normalizedY = prefs.getFloat(KEY_BUBBLE_Y, 1f)
-        updateBubblePosition(availableWidth * normalizedX, availableHeight * normalizedY)
+        val savedX = minX + (maxX - minX) * normalizedX
+        val savedY = minY + (maxY - minY) * normalizedY
+        return savedX to savedY
+    }
+
+    private fun getAvailableScreenBounds(): Rect {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val metrics = windowManager.currentWindowMetrics
+            val insets = metrics.windowInsets.getInsetsIgnoringVisibility(
+                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
+            )
+            Rect(
+                metrics.bounds.left + insets.left + dpToPx(BUBBLE_MARGIN_DP),
+                metrics.bounds.top + insets.top + dpToPx(BUBBLE_MARGIN_DP),
+                metrics.bounds.right - insets.right - dpToPx(BUBBLE_MARGIN_DP),
+                metrics.bounds.bottom - insets.bottom - dpToPx(BUBBLE_MARGIN_DP),
+            )
+        } else {
+            val metrics = resources.displayMetrics
+            Rect(
+                dpToPx(BUBBLE_MARGIN_DP),
+                dpToPx(BUBBLE_MARGIN_DP),
+                metrics.widthPixels - dpToPx(BUBBLE_MARGIN_DP),
+                metrics.heightPixels - dpToPx(BUBBLE_MARGIN_DP),
+            )
+        }
     }
 
     private fun updateBubblePosition(rawX: Float, rawY: Float) {
-        val availableWidth = (rootView.width - rootView.paddingLeft - rootView.paddingRight - bubbleContainer.width).coerceAtLeast(0)
-        val availableHeight = (rootView.height - rootView.paddingTop - rootView.paddingBottom - bubbleContainer.height).coerceAtLeast(0)
-        bubbleTranslationX = rawX.coerceIn(0f, availableWidth.toFloat())
-        bubbleTranslationY = rawY.coerceIn(0f, availableHeight.toFloat())
-        bubbleContainer.translationX = bubbleTranslationX
-        bubbleContainer.translationY = bubbleTranslationY
+        val popup = bubblePopup ?: return
+        val screenBounds = getAvailableScreenBounds()
+        val (contentWidth, contentHeight) = measurePopupContent()
+        val minX = screenBounds.left.toFloat()
+        val minY = screenBounds.top.toFloat()
+        val maxX = (screenBounds.right - contentWidth).coerceAtLeast(screenBounds.left).toFloat()
+        val maxY = (screenBounds.bottom - contentHeight).coerceAtLeast(screenBounds.top).toFloat()
+        bubblePositionX = rawX.coerceIn(minX, maxX)
+        bubblePositionY = rawY.coerceIn(minY, maxY)
+        if (popup.isShowing) {
+            popup.update(bubblePositionX.toInt(), bubblePositionY.toInt(), -1, -1)
+        }
     }
 
     private fun persistBubblePosition() {
-        val availableWidth = (rootView.width - rootView.paddingLeft - rootView.paddingRight - bubbleContainer.width).coerceAtLeast(1)
-        val availableHeight = (rootView.height - rootView.paddingTop - rootView.paddingBottom - bubbleContainer.height).coerceAtLeast(1)
+        val screenBounds = getAvailableScreenBounds()
+        val (contentWidth, contentHeight) = measurePopupContent()
+        val minX = screenBounds.left.toFloat()
+        val minY = screenBounds.top.toFloat()
+        val maxX = (screenBounds.right - contentWidth).coerceAtLeast(screenBounds.left).toFloat()
+        val maxY = (screenBounds.bottom - contentHeight).coerceAtLeast(screenBounds.top).toFloat()
+        val normalizedX = if (maxX == minX) {
+            1f
+        } else {
+            (bubblePositionX - minX) / (maxX - minX)
+        }
+        val normalizedY = if (maxY == minY) {
+            1f
+        } else {
+            (bubblePositionY - minY) / (maxY - minY)
+        }
         prefs.edit()
-            .putFloat(KEY_BUBBLE_X, bubbleTranslationX / availableWidth)
-            .putFloat(KEY_BUBBLE_Y, bubbleTranslationY / availableHeight)
+            .putFloat(KEY_BUBBLE_X, normalizedX.coerceIn(0f, 1f))
+            .putFloat(KEY_BUBBLE_Y, normalizedY.coerceIn(0f, 1f))
             .putInt(KEY_BUBBLE_LAYOUT_VERSION, BUBBLE_LAYOUT_VERSION)
             .apply()
     }
@@ -381,44 +506,50 @@ class VoiceInputMethodService : InputMethodService() {
             .apply()
     }
 
+    private fun showBubbleMessage(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
     private fun renderState(newState: ImePanelState) {
+        val previousState = state
         state = newState
-        if (!::statusView.isInitialized) {
+        if (!::bubbleButton.isInitialized) {
             return
         }
 
         when (newState) {
             is ImePanelState.Idle -> {
-                statusView.visibility = View.GONE
-                statusView.text = newState.message
                 bubbleButton.text = ""
                 bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_idle)
+                if (newState.message != DEFAULT_IDLE_MESSAGE && previousState != newState) {
+                    showBubbleMessage(newState.message)
+                }
             }
 
             is ImePanelState.Listening -> {
-                statusView.visibility = View.GONE
-                statusView.text = "录音中，轻点结束：${newState.label}"
                 bubbleButton.text = "录音中"
                 bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_idle)
             }
 
             is ImePanelState.Processing -> {
-                statusView.visibility = View.GONE
-                statusView.text = newState.label
                 bubbleButton.text = newState.label
                 bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_idle)
             }
 
             is ImePanelState.Error -> {
-                statusView.visibility = View.VISIBLE
-                statusView.text = "提示：${newState.message}"
                 bubbleButton.text = ""
                 bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_idle)
+                if (previousState != newState) {
+                    showBubbleMessage(newState.message)
+                }
             }
         }
 
-        val busy = newState is ImePanelState.Processing
-        bubbleButton.isEnabled = !busy
+        bubbleButton.isEnabled = true
+    }
+
+    private fun dpToPx(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
     }
 
     private data class EditorSnapshot(
@@ -429,7 +560,7 @@ class VoiceInputMethodService : InputMethodService() {
 
     private sealed interface ImePanelState {
         data class Idle(
-            val message: String = "轻点开始说话，长按修正全文。",
+            val message: String = DEFAULT_IDLE_MESSAGE,
         ) : ImePanelState
         data class Listening(val label: String) : ImePanelState
         data class Processing(val label: String) : ImePanelState
@@ -441,6 +572,9 @@ class VoiceInputMethodService : InputMethodService() {
         private const val KEY_BUBBLE_X = "bubble_x"
         private const val KEY_BUBBLE_Y = "bubble_y"
         private const val KEY_BUBBLE_LAYOUT_VERSION = "bubble_layout_version"
-        private const val BUBBLE_LAYOUT_VERSION = 2
+        private const val BUBBLE_LAYOUT_VERSION = 3
+        private const val BUBBLE_SIZE_DP = 72
+        private const val BUBBLE_MARGIN_DP = 16
+        private const val DEFAULT_IDLE_MESSAGE = "轻点开始说话，长按修正全文。"
     }
 }
