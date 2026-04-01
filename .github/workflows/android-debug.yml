@@ -8,7 +8,10 @@ on:
   workflow_dispatch:
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  ANDROID_CMDLINE_TOOLS: /usr/local/lib/android/sdk/cmdline-tools/latest/bin
+  ANDROID_PLATFORM_TOOLS: /usr/local/lib/android/sdk/platform-tools
 
 jobs:
   build-debug-apk:
@@ -26,11 +29,12 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3.2.2
+      - name: Prepare Android SDK tools
+        run: echo "$ANDROID_CMDLINE_TOOLS" >> "$GITHUB_PATH"
 
       - name: Install Android SDK packages
         run: |
+          echo "$ANDROID_PLATFORM_TOOLS" >> "$GITHUB_PATH"
           sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle
@@ -39,9 +43,6 @@ jobs:
           gradle-version: 8.7
 
       - name: Build debug APK
-        env:
-          ANDROID_HOME: /usr/local/lib/android/sdk
-          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: gradle assembleDebug --stacktrace
 
       - name: Upload debug APK
