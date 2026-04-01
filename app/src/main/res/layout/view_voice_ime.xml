@@ -12,7 +12,7 @@
         android:id="@+id/ime_bubble_container"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="end|bottom"
+        android:layout_gravity="start|top"
         android:gravity="end"
         android:orientation="vertical">
 
