@@ -16,6 +16,17 @@ class ArkTextCorrector {
     private val mediaType = "application/json; charset=utf-8".toMediaType()
 
     @Throws(IOException::class)
+    suspend fun runModelTest(text: String, settings: AppSettings): String {
+        return withContext(Dispatchers.IO) {
+            requestCorrection(
+                settings = settings,
+                operationPrompt = "这是豆包模型连通性测试。请把下面这段文本修正成适合直接输入的最终版本，只输出结果。",
+                inputText = text,
+            )
+        }
+    }
+
+    @Throws(IOException::class)
     suspend fun correctDictation(text: String, settings: AppSettings): String {
         return withContext(Dispatchers.IO) {
             requestCorrection(
@@ -51,7 +62,7 @@ class ArkTextCorrector {
                     .put(
                         JSONObject()
                             .put("role", "system")
-                            .put("content", settings.correctionPrompt),
+                            .put("content", AppSettings.DEFAULT_CORRECTION_PROMPT),
                     )
                     .put(
                         JSONObject()
@@ -61,7 +72,7 @@ class ArkTextCorrector {
             )
 
         val request = Request.Builder()
-            .url("${settings.arkBaseUrl.trimEnd('/')}/chat/completions")
+            .url("${AppSettings.DEFAULT_ARK_BASE_URL.trimEnd('/')}/chat/completions")
             .header("Authorization", "Bearer ${settings.arkApiKey}")
             .header("Content-Type", "application/json")
             .post(payload.toString().toRequestBody(mediaType))

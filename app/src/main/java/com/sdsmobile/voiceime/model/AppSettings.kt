@@ -1,32 +1,16 @@
 package com.sdsmobile.voiceime.model
 
-enum class AsrMode {
-    BIG_MODEL,
-    STANDARD,
-}
-
 data class AppSettings(
-    val asrMode: AsrMode = AsrMode.BIG_MODEL,
-    val speechAppId: String = "",
+    val speechAppId: String = DEFAULT_SPEECH_APP_ID,
     val speechToken: String = "",
-    val speechCluster: String = "",
     val speechResourceId: String = "",
-    val speechAddress: String = "wss://openspeech.bytedance.com",
-    val speechUri: String = "/api/v3/sauc/bigmodel",
-    val speechRequestParamsJson: String = DEFAULT_ASR_REQUEST_PARAMS_JSON,
     val arkApiKey: String = "",
-    val arkBaseUrl: String = DEFAULT_ARK_BASE_URL,
     val arkModel: String = "",
-    val correctionPrompt: String = DEFAULT_CORRECTION_PROMPT,
 ) {
     fun isSpeechConfigured(): Boolean {
-        if (speechAppId.isBlank() || speechToken.isBlank()) {
-            return false
-        }
-        return when (asrMode) {
-            AsrMode.BIG_MODEL -> speechResourceId.isNotBlank()
-            AsrMode.STANDARD -> speechCluster.isNotBlank()
-        }
+        return speechAppId.isNotBlank() &&
+            speechToken.isNotBlank() &&
+            speechResourceId.isNotBlank()
     }
 
     fun isCorrectionConfigured(): Boolean {
@@ -34,10 +18,17 @@ data class AppSettings(
     }
 
     companion object {
+        const val DEFAULT_SPEECH_APP_ID = "2586725503"
+        const val DEFAULT_SPEECH_ADDRESS = "wss://openspeech.bytedance.com"
+        const val DEFAULT_SPEECH_URI = "/api/v3/sauc/bigmodel"
+        const val DEFAULT_SPEECH_REQUEST_PARAMS_JSON =
+            """{"end_window_size":800,"force_to_speech_time":0}"""
+        const val EXAMPLE_SPEECH_RESOURCE_ID =
+            "Doubao_Seed_ASR_Streaming_2.02000000610881820034"
         const val DEFAULT_ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
         const val DEFAULT_CORRECTION_PROMPT =
             "你是中文输入法纠错器。请在不改变原意的前提下修正错别字、标点、语气词和语音识别导致的同音错误。只输出修正后的最终文本，不要解释。"
-        const val DEFAULT_ASR_REQUEST_PARAMS_JSON =
-            """{"end_window_size":800,"force_to_speech_time":0}"""
+        const val DEFAULT_LLM_TEST_INPUT =
+            "今天天器不错 明天下五两点开会 记得带和同原件"
     }
 }

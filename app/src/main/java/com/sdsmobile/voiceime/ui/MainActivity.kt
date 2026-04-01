@@ -36,7 +36,6 @@ import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -67,7 +66,6 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.sdsmobile.voiceime.VoiceImeApplication
 import com.sdsmobile.voiceime.model.AppSettings
-import com.sdsmobile.voiceime.model.AsrMode
 import com.sdsmobile.voiceime.service.BubbleOverlayService
 import com.sdsmobile.voiceime.ui.theme.SdsVoiceImeTheme
 import kotlinx.coroutines.launch
@@ -77,7 +75,11 @@ class MainActivity : ComponentActivity() {
         viewModelFactory {
             initializer {
                 val container = (application as VoiceImeApplication).appContainer
-                MainViewModel(container.settingsRepository)
+                MainViewModel(
+                    appContext = applicationContext,
+                    repository = container.settingsRepository,
+                    arkTextCorrector = container.arkTextCorrector,
+                )
             }
         }
     }
@@ -169,8 +171,15 @@ private fun MainScreen(viewModel: MainViewModel) {
 
                 SettingsCard(
                     settings = uiState.draft,
-                    onModeChange = viewModel::updateMode,
                     onUpdate = viewModel::updateDraft,
+                )
+
+                TestingCard(
+                    speechTest = uiState.speechTest,
+                    llmTest = uiState.llmTest,
+                    onToggleSpeechTest = { viewModel.toggleSpeechTest(audioGranted) },
+                    onLlmInputChange = viewModel::updateLlmTestInput,
+                    onRunLlmTest = viewModel::runLlmTest,
                 )
 
                 ActionCard(
@@ -216,7 +225,7 @@ private fun HeroCard(
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "点按悬浮球开始或结束语音输入，长按直接修正当前输入框已有文本。",
+                text = "配置只保留豆包语音和豆包模型两段参数。点按悬浮球开始或结束输入，长按会修正当前输入框已有文本。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFFD1D5DB),
             )
@@ -247,7 +256,7 @@ private fun PermissionCard(
 ) {
     SectionCard(
         title = "系统开关",
-        subtitle = "这类悬浮输入需要悬浮窗、麦克风和无障碍三项能力。",
+        subtitle = "悬浮输入需要悬浮窗、麦克风和无障碍三项能力，通知权限只用于前台服务常驻。",
     ) {
         PermissionRow("悬浮窗", overlayGranted, onOverlayClick)
         PermissionRow("麦克风", audioGranted, onAudioClick)
@@ -259,97 +268,125 @@ private fun PermissionCard(
 @Composable
 private fun SettingsCard(
     settings: AppSettings,
-    onModeChange: (AsrMode) -> Unit,
     onUpdate: ((AppSettings) -> AppSettings) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SectionCard(
             title = "豆包语音",
-            subtitle = "默认按大模型流式识别配置；如你走传统流式 ASR，可切换到标准模式。",
-                icon = Icons.Outlined.GraphicEq,
+            subtitle = "按豆包流式语音识别 2.0 接入，只需要填 App ID、Access Token 和 Resource ID。地址、URI 和请求参数已内置。",
+            icon = Icons.Outlined.GraphicEq,
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = settings.asrMode == AsrMode.BIG_MODEL,
-                    onClick = { onModeChange(AsrMode.BIG_MODEL) },
-                    label = { Text("大模型") },
-                )
-                FilterChip(
-                    selected = settings.asrMode == AsrMode.STANDARD,
-                    onClick = { onModeChange(AsrMode.STANDARD) },
-                    label = { Text("标准 ASR") },
-                )
-            }
             FormField(
-                label = "App ID / App Key",
+                label = "App ID",
                 value = settings.speechAppId,
                 onValueChange = { onUpdate { current -> current.copy(speechAppId = it) } },
+                supportingText = "默认带入当前控制台里的 APP ID，可按需改成别的应用。",
             )
             SecretField(
-                label = "Speech Token",
+                label = "Access Token",
                 value = settings.speechToken,
                 onValueChange = { onUpdate { current -> current.copy(speechToken = it) } },
-            )
-            if (settings.asrMode == AsrMode.BIG_MODEL) {
-                FormField(
-                    label = "Resource ID",
-                    value = settings.speechResourceId,
-                    onValueChange = { onUpdate { current -> current.copy(speechResourceId = it) } },
-                )
-            } else {
-                FormField(
-                    label = "Cluster",
-                    value = settings.speechCluster,
-                    onValueChange = { onUpdate { current -> current.copy(speechCluster = it) } },
-                )
-            }
-            FormField(
-                label = "Speech Address",
-                value = settings.speechAddress,
-                onValueChange = { onUpdate { current -> current.copy(speechAddress = it) } },
+                supportingText = "对应豆包语音控制台“服务接口认证信息”里的 Access Token。",
             )
             FormField(
-                label = "Speech URI",
-                value = settings.speechUri,
-                onValueChange = { onUpdate { current -> current.copy(speechUri = it) } },
-            )
-            FormField(
-                label = "ASR Request Params JSON",
-                value = settings.speechRequestParamsJson,
-                onValueChange = { onUpdate { current -> current.copy(speechRequestParamsJson = it) } },
-                singleLine = false,
-                minLines = 3,
+                label = "Resource ID / 实例 ID",
+                value = settings.speechResourceId,
+                onValueChange = { onUpdate { current -> current.copy(speechResourceId = it) } },
+                placeholder = AppSettings.EXAMPLE_SPEECH_RESOURCE_ID,
+                supportingText = "可直接填控制台实例名，例如上面的 Doubao_Seed_ASR_Streaming_2.0...",
             )
         }
 
         SectionCard(
-            title = "火山方舟纠错",
-            subtitle = "识别结束后会先调用模型纠错，再写入当前输入框；长按悬浮球会修正输入框已有内容。",
+            title = "豆包模型纠错",
+            subtitle = "识别结束后会用豆包模型把文本修顺，再写入输入框。这里也只保留 API Key 和模型接入点两个字段。",
             icon = Icons.Outlined.Tune,
         ) {
             SecretField(
                 label = "Ark API Key",
                 value = settings.arkApiKey,
                 onValueChange = { onUpdate { current -> current.copy(arkApiKey = it) } },
+                supportingText = "在火山方舟控制台 API Key 管理里创建并复制。",
             )
             FormField(
-                label = "Ark Base URL",
-                value = settings.arkBaseUrl,
-                onValueChange = { onUpdate { current -> current.copy(arkBaseUrl = it) } },
-            )
-            FormField(
-                label = "Model / Endpoint ID",
+                label = "Endpoint ID / Model ID",
                 value = settings.arkModel,
                 onValueChange = { onUpdate { current -> current.copy(arkModel = it) } },
-            )
-            FormField(
-                label = "System Prompt",
-                value = settings.correctionPrompt,
-                onValueChange = { onUpdate { current -> current.copy(correctionPrompt = it) } },
-                singleLine = false,
-                minLines = 4,
+                supportingText = "按官方接入方式，优先填写在线推理的 Endpoint ID；调用基础模型时也可填可用的 model ID。",
             )
         }
+    }
+}
+
+@Composable
+private fun TestingCard(
+    speechTest: SpeechTestUiState,
+    llmTest: LlmTestUiState,
+    onToggleSpeechTest: () -> Unit,
+    onLlmInputChange: (String) -> Unit,
+    onRunLlmTest: () -> Unit,
+) {
+    SectionCard(
+        title = "连通性测试",
+        subtitle = "先测豆包语音 SDK，再单独测方舟 LLM。两个测试都只在当前页面展示结果，不会写入别的 App。",
+        icon = Icons.Outlined.SettingsSuggest,
+    ) {
+        Text(
+            text = "语音识别测试",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        StatusChip(
+            text = "状态：${speechTest.status}",
+            active = speechTest.isRunning || speechTest.finalText.isNotBlank(),
+        )
+        Button(
+            onClick = onToggleSpeechTest,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (speechTest.isRunning) "结束语音识别测试" else "开始语音识别测试")
+        }
+        TestResultPanel(
+            title = "识别结果",
+            lines = listOfNotNull(
+                speechTest.partialText.takeIf { it.isNotBlank() }?.let { "实时文本：$it" },
+                speechTest.finalText.takeIf { it.isNotBlank() }?.let { "最终文本：$it" },
+                speechTest.error?.let { "错误：$it" },
+            ),
+            emptyText = "点开始后会直接录音，结束后在这里显示实时结果和最终结果。",
+        )
+
+        Text(
+            text = "LLM 测试",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        FormField(
+            label = "测试文本",
+            value = llmTest.inputText,
+            onValueChange = onLlmInputChange,
+            singleLine = false,
+            minLines = 3,
+            supportingText = "默认放了一段带语音识别错字的文本，点按钮后只测试豆包模型纠错能力。",
+        )
+        StatusChip(
+            text = "状态：${llmTest.status}",
+            active = llmTest.isRunning || llmTest.outputText.isNotBlank(),
+        )
+        Button(
+            onClick = onRunLlmTest,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (llmTest.isRunning) "LLM 测试中" else "测试 LLM")
+        }
+        TestResultPanel(
+            title = "LLM 返回",
+            lines = listOfNotNull(
+                llmTest.outputText.takeIf { it.isNotBlank() }?.let { "输出：$it" },
+                llmTest.error?.let { "错误：$it" },
+            ),
+            emptyText = "这里会显示模型纠错后的文本，便于单独检查 API Key 和 Endpoint ID 是否通。",
+        )
     }
 }
 
@@ -361,7 +398,7 @@ private fun ActionCard(
 ) {
     SectionCard(
         title = "操作",
-        subtitle = "保存配置后可直接启动悬浮球。启动按钮也会自动保存当前表单。",
+        subtitle = "保存配置后可直接启动悬浮球。启动按钮也会先保存当前表单。",
         icon = Icons.Outlined.SettingsSuggest,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -370,6 +407,46 @@ private fun ActionCard(
             }
             Button(onClick = onToggleBubble, modifier = Modifier.fillMaxWidth()) {
                 Text(if (bubbleRunning) "关闭悬浮球" else "启动悬浮球")
+            }
+        }
+    }
+}
+
+@Composable
+private fun TestResultPanel(
+    title: String,
+    lines: List<String>,
+    emptyText: String,
+) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (lines.isEmpty()) {
+                Text(
+                    text = emptyText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFF64748B),
+                )
+            } else {
+                lines.forEach { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFF0F172A),
+                    )
+                }
             }
         }
     }
@@ -458,12 +535,16 @@ private fun FormField(
     onValueChange: (String) -> Unit,
     singleLine: Boolean = true,
     minLines: Int = 1,
+    placeholder: String? = null,
+    supportingText: String? = null,
 ) {
     OutlinedTextField(
         modifier = Modifier.fillMaxWidth(),
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
+        placeholder = placeholder?.let { { Text(it) } },
+        supportingText = supportingText?.let { { Text(it) } },
         singleLine = singleLine,
         minLines = minLines,
         shape = RoundedCornerShape(18.dp),
@@ -475,12 +556,14 @@ private fun SecretField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
+    supportingText: String? = null,
 ) {
     OutlinedTextField(
         modifier = Modifier.fillMaxWidth(),
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
+        supportingText = supportingText?.let { { Text(it) } },
         singleLine = true,
         visualTransformation = PasswordVisualTransformation(),
         shape = RoundedCornerShape(18.dp),

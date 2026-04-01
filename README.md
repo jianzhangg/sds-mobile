@@ -9,8 +9,8 @@
 ## 当前实现
 
 - 豆包语音：
-  - 默认支持大模型流式识别配置，地址默认为 `wss://openspeech.bytedance.com`，URI 默认为 `/api/v3/sauc/bigmodel`。
-  - 也保留了“标准 ASR”模式，可切回 `/api/v2/asr + cluster`。
+  - 只保留豆包流式语音识别 2.0 这一条接入路径。
+  - 地址固定为 `wss://openspeech.bytedance.com`，URI 固定为 `/api/v3/sauc/bigmodel`，请求参数也已内置。
   - 使用官方 Android `SpeechEngine` SDK，并用反射封装，降低 SDK 小版本差异带来的编译风险。
 - 火山方舟纠错：
   - 通过 OpenAI 兼容的 `chat/completions` 接口调用模型。
@@ -26,23 +26,38 @@
 - 豆包语音 SDK 官方文档标注 Android 仅支持 `armeabi-v7a / arm64-v8a`。
   - 因此更适合真机，x86 模拟器大概率不行。
 - 当前环境没有 Java / Gradle / Android SDK，所以我没法在这里实际编译 APK。
-  - 工程文件已经落齐，但 `gradle-wrapper.jar` 没法在本地自动生成，需要你在 Android Studio 打开后同步一次。
+  - 当前仓库已经通过 GitHub Actions 自动打 debug APK，不依赖你本地先装 Android Studio。
 
-## 打开工程后建议
+## 配置项
 
-1. 用 Android Studio 直接打开本目录。
-2. 让 IDE 自动补齐 Gradle Wrapper。
-3. 在真机上安装并授予：
+主页面现在只保留 5 个字段：
+
+1. 豆包语音 `App ID`
+2. 豆包语音 `Access Token`
+3. 豆包语音 `Resource ID / 实例 ID`
+4. 火山方舟 `API Key`
+5. 豆包模型 `Endpoint ID / Model ID`
+
+其中这些参数已经固定内置，不需要再填：
+
+- 语音地址：`wss://openspeech.bytedance.com`
+- 语音 URI：`/api/v3/sauc/bigmodel`
+- 方舟 Base URL：`https://ark.cn-beijing.volces.com/api/v3`
+- 纠错 System Prompt
+
+## 手机上怎么试
+
+1. 安装 release 页面里的 `sds-mobile-debug.apk`。
+2. 打开 App，填上面 5 个字段。
+3. 先在首页测试：
+   - `开始语音识别测试`：测试豆包语音 SDK，结果只显示在当前页面。
+   - `测试 LLM`：测试豆包模型纠错，结果也只显示在当前页面。
+4. 测通后，再授予：
    - 麦克风权限
    - 悬浮窗权限
    - 无障碍服务
    - 通知权限（Android 13+）
-4. 在主页面填入：
-   - 豆包语音 `App ID/App Key`
-   - `Token`
-   - 大模型模式下的 `Resource ID`
-   - 火山方舟 `API Key`
-   - `Model / Endpoint ID`
+5. 点击 `启动悬浮球`。
 
 ## GitHub Actions 打包
 

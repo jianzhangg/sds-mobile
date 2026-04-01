@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.Context
 import android.provider.Settings
 import com.sdsmobile.voiceime.model.AppSettings
-import com.sdsmobile.voiceime.model.AsrMode
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
@@ -116,21 +115,14 @@ class DoubaoSpeechRecognizer(
         setBooleanOption(engineInstance, "PARAMS_KEY_ASR_SHOW_NLU_PUNC_BOOL", true)
         setBooleanOption(engineInstance, "PARAMS_KEY_ASR_AUTO_STOP_BOOL", true)
         setStringOption(engineInstance, "PARAMS_KEY_ASR_RESULT_TYPE_STRING", readStringConstant("ASR_RESULT_TYPE_FULL"))
-
-        if (settings.speechRequestParamsJson.isNotBlank()) {
-            setStringOption(engineInstance, "PARAMS_KEY_ASR_REQ_PARAMS_STRING", settings.speechRequestParamsJson)
-        }
+        setStringOption(
+            engineInstance,
+            "PARAMS_KEY_ASR_REQ_PARAMS_STRING",
+            AppSettings.DEFAULT_SPEECH_REQUEST_PARAMS_JSON,
+        )
         setBooleanOption(engineInstance, "PARAMS_KEY_ASR_SHOW_UTTER_BOOL", true)
-
-        when (settings.asrMode) {
-            AsrMode.BIG_MODEL -> configureBigModel(engineInstance, settings)
-            AsrMode.STANDARD -> configureStandard(engineInstance, settings)
-        }
-    }
-
-    private fun configureBigModel(engineInstance: Any, settings: AppSettings) {
-        setStringOption(engineInstance, "PARAMS_KEY_ASR_ADDRESS_STRING", settings.speechAddress)
-        setStringOption(engineInstance, "PARAMS_KEY_ASR_URI_STRING", settings.speechUri.ifBlank { "/api/v3/sauc/bigmodel" })
+        setStringOption(engineInstance, "PARAMS_KEY_ASR_ADDRESS_STRING", AppSettings.DEFAULT_SPEECH_ADDRESS)
+        setStringOption(engineInstance, "PARAMS_KEY_ASR_URI_STRING", AppSettings.DEFAULT_SPEECH_URI)
         setStringOption(engineInstance, "PARAMS_KEY_APP_ID_STRING", settings.speechAppId)
         setStringOption(engineInstance, "PARAMS_KEY_APP_TOKEN_STRING", settings.speechToken)
         setStringOption(engineInstance, "PARAMS_KEY_RESOURCE_ID_STRING", settings.speechResourceId)
@@ -139,19 +131,6 @@ class DoubaoSpeechRecognizer(
             "PARAMS_KEY_PROTOCOL_TYPE_INT",
             readIntConstant("PROTOCOL_TYPE_SEED", 2),
         )
-    }
-
-    private fun configureStandard(engineInstance: Any, settings: AppSettings) {
-        setStringOption(engineInstance, "PARAMS_KEY_ASR_ADDRESS_STRING", settings.speechAddress)
-        setStringOption(engineInstance, "PARAMS_KEY_ASR_URI_STRING", settings.speechUri.ifBlank { "/api/v2/asr" })
-        setStringOption(engineInstance, "PARAMS_KEY_APP_ID_STRING", settings.speechAppId)
-        val token = if (settings.speechToken.startsWith("Bearer;")) {
-            settings.speechToken
-        } else {
-            "Bearer;${settings.speechToken}"
-        }
-        setStringOption(engineInstance, "PARAMS_KEY_APP_TOKEN_STRING", token)
-        setStringOption(engineInstance, "PARAMS_KEY_ASR_CLUSTER_STRING", settings.speechCluster)
     }
 
     private fun resolveUid(): String {
@@ -193,9 +172,7 @@ class DoubaoSpeechRecognizer(
             }
             readIntConstant("MESSAGE_TYPE_FINAL_RESULT", -1) -> {
                 val text = extractText(payload)
-                if (text.isNotBlank()) {
-                    postToMain { callback.onFinalText(text) }
-                }
+                postToMain { callback.onFinalText(text) }
             }
             readIntConstant("MESSAGE_TYPE_ENGINE_ERROR", -1) -> {
                 val message = parseErrorMessage(payload)
