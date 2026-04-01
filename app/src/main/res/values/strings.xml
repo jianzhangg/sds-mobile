@@ -1,6 +1,9 @@
 <resources>
-    <string name="app_name">豆包语音悬浮输入</string>
-    <string name="notification_channel_name">悬浮输入服务</string>
-    <string name="notification_title">豆包语音悬浮输入已启用</string>
-    <string name="notification_text">点按悬浮球输入，长按修正当前输入框内容</string>
+    <string name="app_name">豆包语音输入法</string>
+    <string name="ime_subtype_label">中文语音输入</string>
+    <string name="ime_panel_title">豆包语音输入</string>
+    <string name="ime_panel_status_default">点“开始说话”输入，点“修正全文”改当前输入框内容。</string>
+    <string name="ime_panel_action_start">开始说话</string>
+    <string name="ime_panel_action_correct">修正全文</string>
+    <string name="ime_panel_action_close">收起</string>
 </resources>

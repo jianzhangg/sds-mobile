@@ -1,13 +1,13 @@
 package com.sdsmobile.voiceime.ui
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -29,7 +29,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.GraphicEq
-import androidx.compose.material.icons.outlined.SettingsSuggest
+import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -48,6 +49,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,7 +68,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.sdsmobile.voiceime.VoiceImeApplication
 import com.sdsmobile.voiceime.model.AppSettings
-import com.sdsmobile.voiceime.service.BubbleOverlayService
+import com.sdsmobile.voiceime.service.VoiceInputMethodService
 import com.sdsmobile.voiceime.ui.theme.SdsVoiceImeTheme
 import kotlinx.coroutines.launch
 
@@ -102,30 +104,20 @@ private fun MainScreen(viewModel: MainViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var overlayGranted by rememberSystemSettingState { Settings.canDrawOverlays(context) }
+    var sampleText by rememberSaveable { mutableStateOf("点击这里测试输入法自动弹出") }
     var audioGranted by rememberSystemSettingState {
         ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.RECORD_AUDIO,
         ) == PackageManager.PERMISSION_GRANTED
     }
-    var notificationsGranted by rememberSystemSettingState {
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) == PackageManager.PERMISSION_GRANTED
-    }
+    var imeEnabled by rememberSystemSettingState { isImeEnabled(context) }
+    var imeSelected by rememberSystemSettingState { isImeSelected(context) }
 
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         audioGranted = granted
-    }
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        notificationsGranted = granted
     }
 
     Box(
@@ -150,28 +142,27 @@ private fun MainScreen(viewModel: MainViewModel) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 HeroCard(
-                    bubbleRunning = uiState.bubbleRunning,
-                    accessibilityConnected = uiState.accessibilityConnected,
+                    imeEnabled = imeEnabled,
+                    imeSelected = imeSelected,
                 )
 
-                PermissionCard(
-                    overlayGranted = overlayGranted,
+                SetupCard(
                     audioGranted = audioGranted,
-                    notificationsGranted = notificationsGranted,
-                    accessibilityConnected = uiState.accessibilityConnected,
-                    onOverlayClick = { openOverlayPermission(context) },
-                    onAccessibilityClick = { openAccessibilitySettings(context) },
+                    imeEnabled = imeEnabled,
+                    imeSelected = imeSelected,
                     onAudioClick = { audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                    onNotificationClick = {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        }
-                    },
+                    onOpenImeSettings = { openInputMethodSettings(context) },
+                    onShowImePicker = { showInputMethodPicker(context) },
                 )
 
                 SettingsCard(
                     settings = uiState.draft,
                     onUpdate = viewModel::updateDraft,
+                )
+
+                SampleEditorCard(
+                    value = sampleText,
+                    onValueChange = { sampleText = it },
                 )
 
                 TestingCard(
@@ -183,20 +174,15 @@ private fun MainScreen(viewModel: MainViewModel) {
                 )
 
                 ActionCard(
-                    bubbleRunning = uiState.bubbleRunning,
                     onSave = {
                         scope.launch {
                             viewModel.persistDraft()
                         }
                     },
-                    onToggleBubble = {
+                    onSaveAndPick = {
                         scope.launch {
                             viewModel.persistDraft()
-                            if (uiState.bubbleRunning) {
-                                BubbleOverlayService.stop(context)
-                            } else {
-                                BubbleOverlayService.start(context)
-                            }
+                            showInputMethodPicker(context)
                         }
                     },
                 )
@@ -207,8 +193,8 @@ private fun MainScreen(viewModel: MainViewModel) {
 
 @Composable
 private fun HeroCard(
-    bubbleRunning: Boolean,
-    accessibilityConnected: Boolean,
+    imeEnabled: Boolean,
+    imeSelected: Boolean,
 ) {
     Card(
         shape = RoundedCornerShape(28.dp),
@@ -219,24 +205,24 @@ private fun HeroCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "豆包语音悬浮输入",
+                text = "豆包语音输入法",
                 style = MaterialTheme.typography.headlineSmall,
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "配置只保留豆包语音和豆包模型两段参数。点按悬浮球开始或结束输入，长按会修正当前输入框已有文本。",
+                text = "现在按真正输入法实现。点进任意输入框时，系统会显示一个小型语音输入面板，不需要悬浮窗权限，也不依赖无障碍。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFFD1D5DB),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusChip(
-                    text = if (bubbleRunning) "悬浮球已运行" else "悬浮球未启动",
-                    active = bubbleRunning,
+                    text = if (imeEnabled) "输入法已启用" else "输入法未启用",
+                    active = imeEnabled,
                 )
                 StatusChip(
-                    text = if (accessibilityConnected) "无障碍已连接" else "无障碍未连接",
-                    active = accessibilityConnected,
+                    text = if (imeSelected) "当前已选中" else "当前未选中",
+                    active = imeSelected,
                 )
             }
         }
@@ -244,24 +230,22 @@ private fun HeroCard(
 }
 
 @Composable
-private fun PermissionCard(
-    overlayGranted: Boolean,
+private fun SetupCard(
     audioGranted: Boolean,
-    notificationsGranted: Boolean,
-    accessibilityConnected: Boolean,
-    onOverlayClick: () -> Unit,
-    onAccessibilityClick: () -> Unit,
+    imeEnabled: Boolean,
+    imeSelected: Boolean,
     onAudioClick: () -> Unit,
-    onNotificationClick: () -> Unit,
+    onOpenImeSettings: () -> Unit,
+    onShowImePicker: () -> Unit,
 ) {
     SectionCard(
-        title = "系统开关",
-        subtitle = "悬浮输入需要悬浮窗、麦克风和无障碍三项能力，通知权限只用于前台服务常驻。",
+        title = "启用步骤",
+        subtitle = "这版不再常驻悬浮球。正确流程是启用输入法、切换到本输入法，然后点进输入框自动出现语音面板。",
+        icon = Icons.Outlined.Keyboard,
     ) {
-        PermissionRow("悬浮窗", overlayGranted, onOverlayClick)
-        PermissionRow("麦克风", audioGranted, onAudioClick)
-        PermissionRow("通知", notificationsGranted, onNotificationClick)
-        PermissionRow("无障碍服务", accessibilityConnected, onAccessibilityClick)
+        PermissionRow("麦克风权限", audioGranted, onAudioClick)
+        PermissionRow("已在系统里启用输入法", imeEnabled, onOpenImeSettings)
+        PermissionRow("当前输入法已切换到本 App", imeSelected, onShowImePicker)
     }
 }
 
@@ -299,7 +283,7 @@ private fun SettingsCard(
 
         SectionCard(
             title = "豆包模型纠错",
-            subtitle = "识别结束后会用豆包模型把文本修顺，再写入输入框。这里也只保留 API Key 和模型接入点两个字段。",
+            subtitle = "语音结果提交前会先做一轮纠错；在输入法面板里点“修正全文”会读取当前输入框内容并整体替换。",
             icon = Icons.Outlined.Tune,
         ) {
             SecretField(
@@ -312,9 +296,30 @@ private fun SettingsCard(
                 label = "Endpoint ID / Model ID",
                 value = settings.arkModel,
                 onValueChange = { onUpdate { current -> current.copy(arkModel = it) } },
-                supportingText = "按官方接入方式，优先填写在线推理的 Endpoint ID；调用基础模型时也可填可用的 model ID。",
+                supportingText = "优先填写在线推理的 Endpoint ID；直接调用基础模型时也可填 model ID。",
             )
         }
+    }
+}
+
+@Composable
+private fun SampleEditorCard(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    SectionCard(
+        title = "输入法手测",
+        subtitle = "先把本 App 选成当前输入法，再点下面输入框。系统会像普通键盘一样自动弹出这个输入法面板。",
+        icon = Icons.Outlined.Science,
+    ) {
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text("示例输入框") },
+            minLines = 4,
+            shape = RoundedCornerShape(18.dp),
+        )
     }
 }
 
@@ -328,8 +333,8 @@ private fun TestingCard(
 ) {
     SectionCard(
         title = "连通性测试",
-        subtitle = "先测豆包语音 SDK，再单独测方舟 LLM。两个测试都只在当前页面展示结果，不会写入别的 App。",
-        icon = Icons.Outlined.SettingsSuggest,
+        subtitle = "这里还是保留独立测试，方便你在切成系统输入法前，先确认豆包语音和 LLM 两条链路都打通。",
+        icon = Icons.Outlined.Science,
     ) {
         Text(
             text = "语音识别测试",
@@ -392,21 +397,20 @@ private fun TestingCard(
 
 @Composable
 private fun ActionCard(
-    bubbleRunning: Boolean,
     onSave: () -> Unit,
-    onToggleBubble: () -> Unit,
+    onSaveAndPick: () -> Unit,
 ) {
     SectionCard(
         title = "操作",
-        subtitle = "保存配置后可直接启动悬浮球。启动按钮也会先保存当前表单。",
-        icon = Icons.Outlined.SettingsSuggest,
+        subtitle = "保存后就可以去系统里启用这个输入法。你也可以直接保存并打开输入法切换器。",
+        icon = Icons.Outlined.Keyboard,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
                 Text("保存配置")
             }
-            Button(onClick = onToggleBubble, modifier = Modifier.fillMaxWidth()) {
-                Text(if (bubbleRunning) "关闭悬浮球" else "启动悬浮球")
+            Button(onClick = onSaveAndPick, modifier = Modifier.fillMaxWidth()) {
+                Text("保存并切换输入法")
             }
         }
     }
@@ -588,14 +592,29 @@ private fun rememberSystemSettingState(provider: () -> Boolean): androidx.compos
     return state
 }
 
-private fun openOverlayPermission(context: Context) {
-    val intent = Intent(
-        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-        Uri.parse("package:${context.packageName}"),
-    )
-    context.startActivity(intent)
+private fun openInputMethodSettings(context: Context) {
+    context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
 }
 
-private fun openAccessibilitySettings(context: Context) {
-    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+private fun showInputMethodPicker(context: Context) {
+    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+    imm?.showInputMethodPicker()
+}
+
+private fun isImeEnabled(context: Context): Boolean {
+    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        ?: return false
+    val serviceName = VoiceInputMethodService::class.java.name
+    return imm.enabledInputMethodList.any {
+        it.packageName == context.packageName && it.serviceName == serviceName
+    }
+}
+
+private fun isImeSelected(context: Context): Boolean {
+    val currentIme = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.DEFAULT_INPUT_METHOD,
+    ).orEmpty()
+    val component = ComponentName(context, VoiceInputMethodService::class.java)
+    return currentIme == component.flattenToString() || currentIme == component.flattenToShortString()
 }

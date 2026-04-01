@@ -5,8 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sdsmobile.voiceime.data.AppSettingsRepository
 import com.sdsmobile.voiceime.model.AppSettings
-import com.sdsmobile.voiceime.service.AccessibilityBridge
-import com.sdsmobile.voiceime.service.BubbleOverlayService
 import com.sdsmobile.voiceime.speech.ArkTextCorrector
 import com.sdsmobile.voiceime.speech.DoubaoSpeechRecognizer
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,8 +34,6 @@ data class LlmTestUiState(
 
 data class MainUiState(
     val draft: AppSettings = AppSettings(),
-    val bubbleRunning: Boolean = false,
-    val accessibilityConnected: Boolean = false,
     val speechTest: SpeechTestUiState = SpeechTestUiState(),
     val llmTest: LlmTestUiState = LlmTestUiState(),
 )
@@ -54,15 +50,11 @@ class MainViewModel(
 
     val uiState: StateFlow<MainUiState> = combine(
         draft,
-        BubbleOverlayService.running,
-        AccessibilityBridge.connected,
         speechTest,
         llmTest,
-    ) { settings, running, accessibility, speech, llm ->
+    ) { settings, speech, llm ->
         MainUiState(
             draft = settings,
-            bubbleRunning = running,
-            accessibilityConnected = accessibility,
             speechTest = speech,
             llmTest = llm,
         )
