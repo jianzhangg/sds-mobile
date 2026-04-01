@@ -2,12 +2,18 @@ package com.sdsmobile.voiceime.service
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Rect
+import android.graphics.Region
+import android.graphics.drawable.ColorDrawable
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.Window
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
@@ -73,6 +79,25 @@ class VoiceInputMethodService : InputMethodService() {
     }
 
     override fun onEvaluateFullscreenMode(): Boolean = false
+
+    override fun onConfigureWindow(win: Window, isFullscreen: Boolean, isCandidatesOnly: Boolean) {
+        super.onConfigureWindow(win, isFullscreen, isCandidatesOnly)
+        win.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        win.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
+    }
+
+    override fun onComputeInsets(outInsets: Insets) {
+        super.onComputeInsets(outInsets)
+        if (!::rootView.isInitialized || !::bubbleContainer.isInitialized) {
+            return
+        }
+
+        outInsets.contentTopInsets = rootView.height
+        outInsets.visibleTopInsets = rootView.height
+        outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
+        outInsets.touchableRegion.set(buildTouchableRegion())
+    }
 
     override fun onCreateInputView(): View {
         val root = layoutInflater.inflate(R.layout.view_voice_ime, null)
@@ -183,7 +208,7 @@ class VoiceInputMethodService : InputMethodService() {
                 return@launch
             }
 
-            renderState(ImePanelState.Processing("修正全文中"))
+            renderState(ImePanelState.Processing("优化中"))
             val corrected = runCatching {
                 appContainer.arkTextCorrector.correctExistingText(snapshot.text, settings)
             }.getOrElse { error ->
@@ -193,7 +218,7 @@ class VoiceInputMethodService : InputMethodService() {
 
             val replaced = replaceAllText(connection, snapshot, corrected)
             if (replaced) {
-                renderState(ImePanelState.Idle("已修正全文"))
+                renderState(ImePanelState.Idle("已优化全文"))
             } else {
                 renderState(ImePanelState.Error("当前输入框不支持整段替换"))
             }
@@ -231,7 +256,7 @@ class VoiceInputMethodService : InputMethodService() {
     }
 
     private fun stopDictation() {
-        renderState(ImePanelState.Processing("收尾中"))
+        renderState(ImePanelState.Processing("识别中"))
         recognizer?.finishTalking()
     }
 
@@ -265,7 +290,7 @@ class VoiceInputMethodService : InputMethodService() {
             return
         }
 
-        renderState(ImePanelState.Processing("纠错中"))
+        renderState(ImePanelState.Processing("优化中"))
         val finalText = if (settings.isCorrectionConfigured()) {
             runCatching {
                 appContainer.arkTextCorrector.correctDictation(rawText, settings)
@@ -367,6 +392,18 @@ class VoiceInputMethodService : InputMethodService() {
             .apply()
     }
 
+    private fun buildTouchableRegion(): Region {
+        val location = IntArray(2)
+        bubbleContainer.getLocationInWindow(location)
+        val rect = Rect(
+            location[0],
+            location[1],
+            location[0] + bubbleContainer.width,
+            location[1] + bubbleContainer.height,
+        )
+        return Region(rect)
+    }
+
     private fun renderState(newState: ImePanelState) {
         state = newState
         if (!::statusView.isInitialized) {
@@ -382,24 +419,24 @@ class VoiceInputMethodService : InputMethodService() {
             }
 
             is ImePanelState.Listening -> {
-                statusView.visibility = View.VISIBLE
+                statusView.visibility = View.GONE
                 statusView.text = "录音中，轻点结束：${newState.label}"
-                bubbleButton.text = ""
-                bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_listening)
+                bubbleButton.text = "录音中"
+                bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_idle)
             }
 
             is ImePanelState.Processing -> {
-                statusView.visibility = View.VISIBLE
+                statusView.visibility = View.GONE
                 statusView.text = newState.label
-                bubbleButton.text = ""
-                bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_processing)
+                bubbleButton.text = newState.label
+                bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_idle)
             }
 
             is ImePanelState.Error -> {
                 statusView.visibility = View.VISIBLE
                 statusView.text = "提示：${newState.message}"
                 bubbleButton.text = ""
-                bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_error)
+                bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_idle)
             }
         }
 
