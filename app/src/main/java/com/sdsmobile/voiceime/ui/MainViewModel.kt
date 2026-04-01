@@ -113,7 +113,7 @@ class MainViewModel(
             !settings.isSpeechConfigured() -> {
                 speechTest.value = SpeechTestUiState(
                     status = "配置不完整",
-                    error = "请先补全豆包语音的 App ID、Access Token 和 Resource ID",
+                    error = "请先填写豆包语音的 Speech Access Token",
                 )
             }
 
@@ -138,7 +138,7 @@ class MainViewModel(
                 llmTest.update {
                     it.copy(
                         status = "配置不完整",
-                        error = "请先填写方舟 API Key 和豆包模型的 Endpoint ID",
+                        error = "请先填写方舟 API Key 和豆包模型的 Model ID",
                     )
                 }
             }

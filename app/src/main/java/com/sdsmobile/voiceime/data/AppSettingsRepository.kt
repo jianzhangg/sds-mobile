@@ -34,9 +34,7 @@ class AppSettingsRepository(context: Context) {
 
     suspend fun save(settings: AppSettings) {
         dataStore.edit { prefs ->
-            prefs[Keys.SPEECH_APP_ID] = settings.speechAppId
             prefs[Keys.SPEECH_TOKEN] = settings.speechToken
-            prefs[Keys.SPEECH_RESOURCE_ID] = settings.speechResourceId
             prefs[Keys.ARK_API_KEY] = settings.arkApiKey
             prefs[Keys.ARK_MODEL] = settings.arkModel
         }
@@ -44,18 +42,14 @@ class AppSettingsRepository(context: Context) {
 
     private fun toSettings(prefs: Preferences): AppSettings {
         return AppSettings(
-            speechAppId = prefs[Keys.SPEECH_APP_ID] ?: AppSettings.DEFAULT_SPEECH_APP_ID,
             speechToken = prefs[Keys.SPEECH_TOKEN].orEmpty(),
-            speechResourceId = prefs[Keys.SPEECH_RESOURCE_ID].orEmpty(),
             arkApiKey = prefs[Keys.ARK_API_KEY].orEmpty(),
-            arkModel = prefs[Keys.ARK_MODEL].orEmpty(),
+            arkModel = prefs[Keys.ARK_MODEL] ?: AppSettings.DEFAULT_ARK_MODEL_ID,
         )
     }
 
     private object Keys {
-        val SPEECH_APP_ID = stringPreferencesKey("speech_app_id")
         val SPEECH_TOKEN = stringPreferencesKey("speech_token")
-        val SPEECH_RESOURCE_ID = stringPreferencesKey("speech_resource_id")
         val ARK_API_KEY = stringPreferencesKey("ark_api_key")
         val ARK_MODEL = stringPreferencesKey("ark_model")
     }

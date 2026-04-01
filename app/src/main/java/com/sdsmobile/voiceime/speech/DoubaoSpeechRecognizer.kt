@@ -123,9 +123,13 @@ class DoubaoSpeechRecognizer(
         setBooleanOption(engineInstance, "PARAMS_KEY_ASR_SHOW_UTTER_BOOL", true)
         setStringOption(engineInstance, "PARAMS_KEY_ASR_ADDRESS_STRING", AppSettings.DEFAULT_SPEECH_ADDRESS)
         setStringOption(engineInstance, "PARAMS_KEY_ASR_URI_STRING", AppSettings.DEFAULT_SPEECH_URI)
-        setStringOption(engineInstance, "PARAMS_KEY_APP_ID_STRING", settings.speechAppId)
+        setStringOption(engineInstance, "PARAMS_KEY_APP_ID_STRING", AppSettings.DEFAULT_SPEECH_APP_ID)
         setStringOption(engineInstance, "PARAMS_KEY_APP_TOKEN_STRING", settings.speechToken)
-        setStringOption(engineInstance, "PARAMS_KEY_RESOURCE_ID_STRING", settings.speechResourceId)
+        setStringOption(
+            engineInstance,
+            "PARAMS_KEY_RESOURCE_ID_STRING",
+            AppSettings.DEFAULT_SPEECH_RESOURCE_ID,
+        )
         setIntOption(
             engineInstance,
             "PARAMS_KEY_PROTOCOL_TYPE_INT",

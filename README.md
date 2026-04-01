@@ -25,25 +25,26 @@
 
 ## 配置项
 
-主页面只保留 5 个字段：
+主页面只保留 3 个字段：
 
-1. 豆包语音 `App ID`
-2. 豆包语音 `Access Token`
-3. 豆包语音 `Resource ID / 实例 ID`
-4. 火山方舟 `API Key`
-5. 豆包模型 `Endpoint ID / Model ID`
+1. 豆包语音 `Speech Access Token`
+2. 火山方舟 `API Key`
+3. 豆包模型 `Model ID`
 
 这些参数已经固定内置，不需要再填：
 
+- 语音 App ID：`2586725503`
+- 语音 Resource ID：`Doubao_Seed_ASR_Streaming_2.02000000610881820034`
 - 语音地址：`wss://openspeech.bytedance.com`
 - 语音 URI：`/api/v3/sauc/bigmodel`
 - 方舟 Base URL：`https://ark.cn-beijing.volces.com/api/v3`
+- 方舟默认 Model ID：`doubao-seed-2-0-pro-260215`
 - 纠错 System Prompt
 
 ## 手机上怎么试
 
-1. 安装 release 页面里的 `sds-mobile-debug.apk`。
-2. 打开 App，填上面 5 个字段。
+1. 安装 release 页面里的 `sds-mobile-release.apk`。
+2. 打开 App，填上面 3 个字段。
 3. 先在首页测试：
    - `开始语音识别测试`：测试豆包语音 SDK，结果只显示在当前页面。
    - `测试 LLM`：测试豆包模型纠错，结果也只显示在当前页面。
@@ -62,10 +63,10 @@
   - push 到 `main` 或 `master`
   - 在 GitHub Actions 页面手动点击 `Run workflow`
 - 产物：
-  - `sds-mobile-debug-apk`
-  - 内含 `app/build/outputs/apk/debug/` 下生成的 debug APK
+  - `sds-mobile-release-apk`
+  - 内含固定签名后的 `sds-mobile-release.apk`
 - 公开下载：
-  - workflow 会自动创建 GitHub Release，并把 `sds-mobile-debug.apk` 作为 release asset 上传
+  - workflow 会自动创建 GitHub Release，并把 `sds-mobile-release.apk` 作为 release asset 上传
 
 ## 参考的官方文档
 

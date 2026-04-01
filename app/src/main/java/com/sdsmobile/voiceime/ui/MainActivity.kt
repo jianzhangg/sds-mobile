@@ -257,27 +257,14 @@ private fun SettingsCard(
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SectionCard(
             title = "豆包语音",
-            subtitle = "按豆包流式语音识别 2.0 接入，只需要填 App ID、Access Token 和 Resource ID。地址、URI 和请求参数已内置。",
+            subtitle = "按豆包流式语音识别 2.0 接入。App ID 和 Resource ID 已固定，只需要填当前账号的 Access Token。",
             icon = Icons.Outlined.GraphicEq,
         ) {
-            FormField(
-                label = "App ID",
-                value = settings.speechAppId,
-                onValueChange = { onUpdate { current -> current.copy(speechAppId = it) } },
-                supportingText = "默认带入当前控制台里的 APP ID，可按需改成别的应用。",
-            )
             SecretField(
-                label = "Access Token",
+                label = "Speech Access Token",
                 value = settings.speechToken,
                 onValueChange = { onUpdate { current -> current.copy(speechToken = it) } },
-                supportingText = "对应豆包语音控制台“服务接口认证信息”里的 Access Token。",
-            )
-            FormField(
-                label = "Resource ID / 实例 ID",
-                value = settings.speechResourceId,
-                onValueChange = { onUpdate { current -> current.copy(speechResourceId = it) } },
-                placeholder = AppSettings.EXAMPLE_SPEECH_RESOURCE_ID,
-                supportingText = "可直接填控制台实例名，例如上面的 Doubao_Seed_ASR_Streaming_2.0...",
+                supportingText = "固定使用 App ID 2586725503 和当前 2.0 流式实例，只需要填写控制台里的 Access Token。",
             )
         }
 
@@ -293,10 +280,11 @@ private fun SettingsCard(
                 supportingText = "在火山方舟控制台 API Key 管理里创建并复制。",
             )
             FormField(
-                label = "Endpoint ID / Model ID",
+                label = "Ark Model ID",
                 value = settings.arkModel,
                 onValueChange = { onUpdate { current -> current.copy(arkModel = it) } },
-                supportingText = "优先填写在线推理的 Endpoint ID；直接调用基础模型时也可填 model ID。",
+                placeholder = AppSettings.DEFAULT_ARK_MODEL_ID,
+                supportingText = "默认值是 2.0 Pro 的在线推理 Model ID。这里只使用 Model ID，不再使用 Endpoint ID。",
             )
         }
     }
@@ -390,7 +378,7 @@ private fun TestingCard(
                 llmTest.outputText.takeIf { it.isNotBlank() }?.let { "输出：$it" },
                 llmTest.error?.let { "错误：$it" },
             ),
-            emptyText = "这里会显示模型纠错后的文本，便于单独检查 API Key 和 Endpoint ID 是否通。",
+            emptyText = "这里会显示模型纠错后的文本，便于单独检查 API Key 和 Model ID 是否通。",
         )
     }
 }
