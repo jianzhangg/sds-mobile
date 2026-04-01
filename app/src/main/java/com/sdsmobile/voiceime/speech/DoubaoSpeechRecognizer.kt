@@ -8,7 +8,6 @@ import java.io.File
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
-import org.json.JSONArray
 import org.json.JSONObject
 
 class DoubaoSpeechRecognizer(
@@ -155,7 +154,7 @@ class DoubaoSpeechRecognizer(
         setStringOption(
             engineInstance,
             "PARAMS_KEY_ASR_REQ_PARAMS_STRING",
-            buildSpeechRequestParamsJson(inputSource),
+            buildSpeechRequestParamsJson(),
         )
         setBooleanOption(engineInstance, "PARAMS_KEY_ASR_SHOW_UTTER_BOOL", true)
         setStringOption(engineInstance, "PARAMS_KEY_ASR_ADDRESS_STRING", AppSettings.DEFAULT_SPEECH_ADDRESS)
@@ -177,7 +176,7 @@ class DoubaoSpeechRecognizer(
                 "uri=${AppSettings.DEFAULT_SPEECH_URI}, source=${inputSource.describe()}, tokenLength=${normalizeSpeechToken(settings.speechToken).length}, " +
                 "debugPath=${debugLogDir.absolutePath}",
         )
-        callback.onLog("reqParams=${buildSpeechRequestParamsJson(inputSource)}")
+        callback.onLog("reqParams=${buildSpeechRequestParamsJson()}")
     }
 
     private fun resolveUid(): String {
@@ -252,6 +251,7 @@ class DoubaoSpeechRecognizer(
                 .ifBlank { root.opt("code")?.toString().orEmpty() }
             val requestId = root.optString("req_id")
                 .ifBlank { root.optString("request_id") }
+                .ifBlank { root.optString("reqid") }
             when {
                 message.isBlank() -> payload
                 code.isBlank() && requestId.isBlank() -> message
@@ -270,41 +270,11 @@ class DoubaoSpeechRecognizer(
             .trim()
     }
 
-    private fun buildSpeechRequestParamsJson(inputSource: InputSource): String {
-        val audioFormat = when (inputSource) {
-            InputSource.Microphone -> "pcm"
-            is InputSource.FileInput -> "pcm"
-        }
-        val audioCodec = when (inputSource) {
-            InputSource.Microphone -> "raw"
-            is InputSource.FileInput -> "raw"
-        }
+    private fun buildSpeechRequestParamsJson(): String {
         return JSONObject()
-            .put(
-                "user",
-                JSONObject().put("uid", resolveUid()),
-            )
-            .put(
-                "audio",
-                JSONObject()
-                    .put("format", audioFormat)
-                    .put("codec", audioCodec)
-                    .put("rate", 16000)
-                    .put("bits", 16)
-                    .put("channel", 1)
-                    .put("language", "zh-CN"),
-            )
-            .put(
-                "request",
-                JSONObject()
-                    .put("model_name", "bigmodel")
-                    .put("enable_itn", true)
-                    .put("enable_punc", true)
-                    .put("show_utterances", true)
-                    .put("end_window_size", 800)
-                    .put("force_to_speech_time", 0)
-                    .put("context", JSONArray()),
-            )
+            .put("enable_itn", true)
+            .put("end_window_size", 800)
+            .put("force_to_speech_time", 0)
             .toString()
     }
 
@@ -331,15 +301,30 @@ class DoubaoSpeechRecognizer(
     private fun extractText(payload: String): String {
         return runCatching {
             val reader = JSONObject(payload)
-            if (!reader.has("result")) {
-                return@runCatching ""
-            }
-            val result = reader.getJSONArray("result")
-            buildString {
-                for (index in 0 until result.length()) {
-                    append(result.getJSONObject(index).optString("text"))
+            val result = reader.opt("result") ?: return@runCatching reader.optString("text").trim()
+            when (result) {
+                is JSONObject -> {
+                    result.optString("text").trim().ifBlank {
+                        result.optJSONArray("utterances")
+                            ?.let { utterances ->
+                                buildString {
+                                    for (index in 0 until utterances.length()) {
+                                        append(utterances.optJSONObject(index)?.optString("text").orEmpty())
+                                    }
+                                }.trim()
+                            }
+                            .orEmpty()
+                    }
                 }
-            }.trim()
+                is org.json.JSONArray -> {
+                    buildString {
+                        for (index in 0 until result.length()) {
+                            append(result.getJSONObject(index).optString("text"))
+                        }
+                    }.trim()
+                }
+                else -> result.toString().trim()
+            }
         }.getOrDefault("")
     }
 
