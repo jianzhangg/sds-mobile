@@ -18,8 +18,6 @@ data class AppSettings(
         const val DEFAULT_SPEECH_RESOURCE_ID = "volc.seedasr.sauc.duration"
         const val DEFAULT_SPEECH_ADDRESS = "wss://openspeech.bytedance.com"
         const val DEFAULT_SPEECH_URI = "/api/v3/sauc/bigmodel"
-        const val DEFAULT_SPEECH_REQUEST_PARAMS_JSON =
-            """{"end_window_size":800,"force_to_speech_time":0}"""
         const val DEFAULT_ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
         const val DEFAULT_ARK_MODEL_ID = "doubao-seed-2-0-pro-260215"
         const val DEFAULT_CORRECTION_PROMPT =

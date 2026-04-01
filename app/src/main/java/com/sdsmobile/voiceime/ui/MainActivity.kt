@@ -57,9 +57,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -104,8 +106,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MainScreen(viewModel: MainViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var showTestingDialog by rememberSaveable { mutableStateOf(false) }
     var sampleText by rememberSaveable { mutableStateOf("点击这里测试输入法自动弹出") }
     var audioGranted by rememberSystemSettingState {
         ContextCompat.checkSelfPermission(
@@ -167,12 +171,8 @@ private fun MainScreen(viewModel: MainViewModel) {
                     onValueChange = { sampleText = it },
                 )
 
-                TestingCard(
-                    speechTest = uiState.speechTest,
-                    llmTest = uiState.llmTest,
-                    onRunSpeechTest = viewModel::runSpeechTest,
-                    onLlmInputChange = viewModel::updateLlmTestInput,
-                    onRunLlmTest = viewModel::runLlmTest,
+                TestingEntryCard(
+                    onOpenTestingDialog = { showTestingDialog = true },
                 )
 
                 ActionCard(
@@ -199,11 +199,44 @@ private fun MainScreen(viewModel: MainViewModel) {
                         Text("知道了")
                     }
                 },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(dialogText))
+                        },
+                    ) {
+                        Text("复制内容")
+                    }
+                },
                 title = { Text("语音识别测试失败") },
                 text = {
                     Text(
                         text = dialogText,
                         style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+            )
+        }
+
+        if (showTestingDialog) {
+            AlertDialog(
+                onDismissRequest = { showTestingDialog = false },
+                confirmButton = {
+                    TextButton(onClick = { showTestingDialog = false }) {
+                        Text("关闭")
+                    }
+                },
+                title = { Text("连通性测试") },
+                text = {
+                    TestingDialogContent(
+                        speechTest = uiState.speechTest,
+                        llmTest = uiState.llmTest,
+                        onRunSpeechTest = viewModel::runSpeechTest,
+                        onCopySpeechReport = {
+                            clipboardManager.setText(AnnotatedString(buildSpeechTestReport(uiState.speechTest)))
+                        },
+                        onLlmInputChange = viewModel::updateLlmTestInput,
+                        onRunLlmTest = viewModel::runLlmTest,
                     )
                 },
             )
@@ -341,17 +374,35 @@ private fun SampleEditorCard(
 }
 
 @Composable
-private fun TestingCard(
-    speechTest: SpeechTestUiState,
-    llmTest: LlmTestUiState,
-    onRunSpeechTest: () -> Unit,
-    onLlmInputChange: (String) -> Unit,
-    onRunLlmTest: () -> Unit,
+private fun TestingEntryCard(
+    onOpenTestingDialog: () -> Unit,
 ) {
     SectionCard(
         title = "连通性测试",
-        subtitle = "这里保留独立测试。语音识别测试会直接跑内置 PCM 文件，不依赖现场录音，方便稳定复现问题。",
+        subtitle = "主页这里只保留测试入口。点进去会弹出测试窗，语音识别和 LLM 的结果都在弹窗里查看。",
         icon = Icons.Outlined.Science,
+    ) {
+        Button(
+            onClick = onOpenTestingDialog,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("打开测试弹窗")
+        }
+    }
+}
+
+@Composable
+private fun TestingDialogContent(
+    speechTest: SpeechTestUiState,
+    llmTest: LlmTestUiState,
+    onRunSpeechTest: () -> Unit,
+    onCopySpeechReport: () -> Unit,
+    onLlmInputChange: (String) -> Unit,
+    onRunLlmTest: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
             text = "语音识别测试",
@@ -369,6 +420,12 @@ private fun TestingCard(
         ) {
             Text(if (speechTest.isRunning) "语音识别测试中" else "开始内置音频识别测试")
         }
+        TextButton(
+            onClick = onCopySpeechReport,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("复制语音测试内容")
+        }
         TestResultPanel(
             title = "识别结果",
             lines = listOfNotNull(
@@ -384,7 +441,6 @@ private fun TestingCard(
             lines = speechTest.logs,
             emptyText = "这里会显示识别配置、阶段日志和 SDK 日志尾部。出错时也会弹窗显示，方便截图排查。",
         )
-
         Text(
             text = "LLM 测试",
             style = MaterialTheme.typography.titleMedium,
@@ -661,6 +717,36 @@ private fun isImeSelected(context: Context): Boolean {
     ).orEmpty()
     val component = ComponentName(context, VoiceInputMethodService::class.java)
     return currentIme == component.flattenToString() || currentIme == component.flattenToShortString()
+}
+
+private fun buildSpeechTestReport(speechTest: SpeechTestUiState): String {
+    return buildString {
+        append("状态：")
+        append(speechTest.status)
+        append("\n")
+        append("参考文本：")
+        append(AppSettings.DEFAULT_SPEECH_TEST_REFERENCE_TEXT)
+        append("\n")
+        if (speechTest.partialText.isNotBlank()) {
+            append("实时文本：")
+            append(speechTest.partialText)
+            append("\n")
+        }
+        if (speechTest.finalText.isNotBlank()) {
+            append("最终文本：")
+            append(speechTest.finalText)
+            append("\n")
+        }
+        if (!speechTest.error.isNullOrBlank()) {
+            append("错误：")
+            append(speechTest.error)
+            append("\n")
+        }
+        if (speechTest.logs.isNotEmpty()) {
+            append("日志：\n")
+            append(speechTest.logs.joinToString("\n"))
+        }
+    }.trim()
 }
 
 private const val SPEECH_CONSOLE_URL =
