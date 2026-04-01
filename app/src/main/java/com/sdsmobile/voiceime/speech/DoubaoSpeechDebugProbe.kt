@@ -37,6 +37,7 @@ data class SpeechDebugMatrixReport(
 
 private data class SpeechProbeCase(
     val name: String,
+    val uri: String,
     val includeCodec: Boolean,
     val requestOptions: JSONObject,
 )
@@ -48,6 +49,7 @@ private data class SpeechProbeCaseResult(
     val finalText: String,
     val reqId: String?,
     val logId: String?,
+    val requestUrl: String,
     val requestHeaders: Map<String, String>,
     val requestJson: String,
     val events: List<String>,
@@ -58,6 +60,8 @@ private data class ParsedServerPacket(
     val messageType: Int,
     val flags: Int,
     val sequence: Int?,
+    val event: Int?,
+    val isLast: Boolean,
     val payloadText: String,
     val payloadPreview: String,
 )
@@ -167,6 +171,7 @@ class DoubaoSpeechDebugProbe(
         onEvent: (String) -> Unit,
     ): SpeechProbeCaseResult {
         val startTime = System.currentTimeMillis()
+        val requestUrl = "${AppSettings.DEFAULT_SPEECH_ADDRESS.trimEnd('/')}${caseConfig.uri}"
         val requestJson = buildRequestJson(
             uid = uid,
             includeCodec = caseConfig.includeCodec,
@@ -205,6 +210,7 @@ class DoubaoSpeechDebugProbe(
                 finalText = finalText,
                 reqId = reqId,
                 logId = logId,
+                requestUrl = requestUrl,
                 requestHeaders = headers,
                 requestJson = prettyJson,
                 events = events.takeLast(MAX_CASE_EVENTS),
@@ -216,12 +222,13 @@ class DoubaoSpeechDebugProbe(
             withTimeout(CASE_TIMEOUT_MS) {
                 suspendCancellableCoroutine { continuation ->
                     val request = Request.Builder()
-                        .url("${AppSettings.DEFAULT_SPEECH_ADDRESS.trimEnd('/')}${AppSettings.DEFAULT_SPEECH_URI}")
+                        .url(requestUrl)
                         .header("X-Api-App-Key", AppSettings.DEFAULT_SPEECH_APP_ID)
                         .header("X-Api-Access-Key", normalizeToken(settings.speechToken))
                         .header("X-Api-Resource-Id", AppSettings.DEFAULT_SPEECH_RESOURCE_ID)
                         .header("X-Api-Connect-Id", connectId)
                         .build()
+                    log("url=$requestUrl")
                     log("connect_id=$connectId")
                     log("headers=${headers.entries.joinToString(", ") { "${it.key}=${it.value}" }}")
                     log("request_json=$prettyJson")
@@ -243,9 +250,12 @@ class DoubaoSpeechDebugProbe(
                             override fun onOpen(webSocket: WebSocket, response: Response) {
                                 logId = response.header("X-Tt-Logid")
                                 log("ws_open logid=${logId.orEmpty()} code=${response.code}")
-                                val fullRequestPacket = buildFullRequestPacket(requestJson.toString())
+                                val fullRequestPacket = buildFullRequestPacket(
+                                    json = requestJson.toString(),
+                                    sequence = 1,
+                                )
                                 val fullRequestSent = webSocket.send(fullRequestPacket.toByteString())
-                                log("send_full_request bytes=${fullRequestPacket.size} ok=$fullRequestSent")
+                                log("send_full_request seq=1 bytes=${fullRequestPacket.size} ok=$fullRequestSent")
                                 if (!fullRequestSent) {
                                     complete(false, "完整请求发送失败")
                                     return
@@ -267,13 +277,13 @@ class DoubaoSpeechDebugProbe(
                                 when (packet.messageType) {
                                     SERVER_FULL_RESPONSE -> {
                                         log(
-                                            "recv_response flags=${packet.flags} seq=${packet.sequence ?: "-"} payload=${packet.payloadPreview}",
+                                            "recv_response flags=${packet.flags} seq=${packet.sequence ?: "-"} event=${packet.event ?: "-"} payload=${packet.payloadPreview}",
                                         )
                                         val text = extractText(packet.payloadText)
                                         if (text.isNotBlank()) {
                                             finalText = text
                                         }
-                                        if (packet.flags == SERVER_EVENT_FINAL_FLAG) {
+                                        if (packet.isLast) {
                                             complete(finalText.isNotBlank(), if (finalText.isBlank()) "服务端返回最终包但没有文本" else null)
                                         }
                                     }
@@ -296,8 +306,33 @@ class DoubaoSpeechDebugProbe(
                             }
 
                             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                                log("ws_failure=${t.message.orEmpty()}")
-                                complete(false, t.message ?: "WebSocket 失败")
+                                val responseBody = runCatching {
+                                    response?.body?.string().orEmpty()
+                                }.getOrDefault("")
+                                val responseCode = response?.code
+                                val responseMessage = response?.message.orEmpty()
+                                val responseLogId = response?.header("X-Tt-Logid").orEmpty()
+                                if (responseLogId.isNotBlank()) {
+                                    logId = responseLogId
+                                }
+                                val detail = buildString {
+                                    append("ws_failure=${t.message.orEmpty()}")
+                                    if (responseCode != null) {
+                                        append(" code=$responseCode")
+                                    }
+                                    if (responseMessage.isNotBlank()) {
+                                        append(" message=$responseMessage")
+                                    }
+                                    if (responseLogId.isNotBlank()) {
+                                        append(" logid=$responseLogId")
+                                    }
+                                    if (responseBody.isNotBlank()) {
+                                        append(" body=$responseBody")
+                                    }
+                                }
+                                log(detail)
+                                val parsedError = responseBody.takeIf { it.isNotBlank() }?.let(::parseErrorMessage)
+                                complete(false, parsedError ?: t.message ?: "WebSocket 失败")
                             }
 
                             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -335,6 +370,7 @@ class DoubaoSpeechDebugProbe(
         val chunkSize = PCM_BYTES_PER_200MS
         val chunkCount = (audioBytes.size + chunkSize - 1) / chunkSize
         onEvent("audio.total_bytes=${audioBytes.size} chunk_size=$chunkSize chunk_count=$chunkCount")
+        var sequence = 2
         for (index in 0 until chunkCount) {
             if (done.get()) {
                 return
@@ -342,14 +378,19 @@ class DoubaoSpeechDebugProbe(
             val start = index * chunkSize
             val end = minOf(audioBytes.size, start + chunkSize)
             val isLast = index == chunkCount - 1
-            val packet = buildAudioPacket(audioBytes.copyOfRange(start, end), isLast)
+            val packet = buildAudioPacket(
+                audio = audioBytes.copyOfRange(start, end),
+                sequence = sequence,
+                isLast = isLast,
+            )
             val sent = webSocket.send(packet.toByteString())
             if (index < 3 || isLast) {
-                onEvent("audio.chunk=${index + 1}/$chunkCount bytes=${end - start} last=$isLast ok=$sent")
+                onEvent("audio.chunk=${index + 1}/$chunkCount seq=${if (isLast) -sequence else sequence} bytes=${end - start} last=$isLast ok=$sent")
             }
             if (!sent) {
                 return
             }
+            sequence += 1
             if (!isLast) {
                 Thread.sleep(200L)
             }
@@ -358,13 +399,18 @@ class DoubaoSpeechDebugProbe(
 
     private fun buildCases(): List<SpeechProbeCase> {
         fun request(
+            enableDdc: Boolean,
             includePunc: Boolean,
             includeUtterances: Boolean,
             includeVad: Boolean,
+            enableNonstream: Boolean,
         ): JSONObject {
             return JSONObject()
                 .put("model_name", "bigmodel")
                 .apply {
+                    if (enableDdc) {
+                        put("enable_ddc", true)
+                    }
                     if (includePunc) {
                         put("enable_itn", true)
                         put("enable_punc", true)
@@ -376,16 +422,43 @@ class DoubaoSpeechDebugProbe(
                         put("end_window_size", 800)
                         put("force_to_speech_time", 0)
                     }
+                    if (enableNonstream) {
+                        put("enable_nonstream", true)
+                    }
                 }
         }
 
         return listOf(
-            SpeechProbeCase("A. 最小请求 + codec", true, request(false, false, false)),
-            SpeechProbeCase("B. 最小请求 - codec", false, request(false, false, false)),
-            SpeechProbeCase("C. ITN/Punc + codec", true, request(true, false, false)),
-            SpeechProbeCase("D. ITN/Punc - codec", false, request(true, false, false)),
-            SpeechProbeCase("E. 完整听写参数 + codec", true, request(true, true, true)),
-            SpeechProbeCase("F. 完整听写参数 - codec", false, request(true, true, true)),
+            SpeechProbeCase(
+                name = "A. 旧链路 /bigmodel",
+                uri = AppSettings.LEGACY_SPEECH_URI,
+                includeCodec = true,
+                requestOptions = request(enableDdc = true, includePunc = true, includeUtterances = true, includeVad = true, enableNonstream = false),
+            ),
+            SpeechProbeCase(
+                name = "B. 正确链路 /bigmodel_async",
+                uri = AppSettings.DEFAULT_SPEECH_URI,
+                includeCodec = true,
+                requestOptions = request(enableDdc = true, includePunc = true, includeUtterances = true, includeVad = true, enableNonstream = false),
+            ),
+            SpeechProbeCase(
+                name = "C. async 无 codec",
+                uri = AppSettings.DEFAULT_SPEECH_URI,
+                includeCodec = false,
+                requestOptions = request(enableDdc = true, includePunc = true, includeUtterances = true, includeVad = true, enableNonstream = false),
+            ),
+            SpeechProbeCase(
+                name = "D. async 最小参数",
+                uri = AppSettings.DEFAULT_SPEECH_URI,
+                includeCodec = true,
+                requestOptions = request(enableDdc = false, includePunc = false, includeUtterances = false, includeVad = false, enableNonstream = false),
+            ),
+            SpeechProbeCase(
+                name = "E. nostream 完整参数",
+                uri = AppSettings.NOSTREAM_SPEECH_URI,
+                includeCodec = true,
+                requestOptions = request(enableDdc = true, includePunc = true, includeUtterances = true, includeVad = true, enableNonstream = false),
+            ),
         )
     }
 
@@ -446,6 +519,7 @@ class DoubaoSpeechDebugProbe(
                 appendLine("耗时: ${result.durationMs} ms")
                 appendLine("req_id: ${result.reqId.orEmpty()}")
                 appendLine("logid: ${result.logId.orEmpty()}")
+                appendLine("URL: ${result.requestUrl}")
                 appendLine("请求头:")
                 result.requestHeaders.forEach { (key, value) ->
                     appendLine("$key: $value")
@@ -466,24 +540,26 @@ class DoubaoSpeechDebugProbe(
         }.trim()
     }
 
-    private fun buildFullRequestPacket(json: String): ByteArray {
+    private fun buildFullRequestPacket(json: String, sequence: Int): ByteArray {
         val payload = gzip(json.toByteArray(Charsets.UTF_8))
         return buildPacket(
             messageType = CLIENT_FULL_REQUEST,
-            flags = 0,
+            flags = CLIENT_POS_SEQUENCE_FLAG,
             serialization = SERIALIZATION_JSON,
             compression = COMPRESSION_GZIP,
+            sequence = sequence,
             payload = payload,
         )
     }
 
-    private fun buildAudioPacket(audio: ByteArray, isLast: Boolean): ByteArray {
+    private fun buildAudioPacket(audio: ByteArray, sequence: Int, isLast: Boolean): ByteArray {
         val payload = gzip(audio)
         return buildPacket(
             messageType = CLIENT_AUDIO_ONLY_REQUEST,
-            flags = if (isLast) CLIENT_AUDIO_FINAL_FLAG else 0,
-            serialization = SERIALIZATION_NONE,
+            flags = if (isLast) CLIENT_NEGATIVE_SEQUENCE_FLAG else CLIENT_POS_SEQUENCE_FLAG,
+            serialization = SERIALIZATION_JSON,
             compression = COMPRESSION_GZIP,
+            sequence = if (isLast) -sequence else sequence,
             payload = payload,
         )
     }
@@ -493,6 +569,7 @@ class DoubaoSpeechDebugProbe(
         flags: Int,
         serialization: Int,
         compression: Int,
+        sequence: Int,
         payload: ByteArray,
     ): ByteArray {
         val header = byteArrayOf(
@@ -501,8 +578,9 @@ class DoubaoSpeechDebugProbe(
             (((serialization shl 4) or compression).and(0xFF)).toByte(),
             0,
         )
+        val sequenceBytes = intToBytes(sequence)
         val payloadSize = intToBytes(payload.size)
-        return header + payloadSize + payload
+        return header + sequenceBytes + payloadSize + payload
     }
 
     private fun parseServerPacket(bytes: ByteArray): ParsedServerPacket {
@@ -511,6 +589,8 @@ class DoubaoSpeechDebugProbe(
                 messageType = -1,
                 flags = -1,
                 sequence = null,
+                event = null,
+                isLast = false,
                 payloadText = bytes.decodeToString(),
                 payloadPreview = bytes.decodeToString().take(400),
             )
@@ -522,11 +602,16 @@ class DoubaoSpeechDebugProbe(
         val compression = bytes[2].toInt() and 0x0F
         var offset = headerSize
         var sequence: Int? = null
-
-        if (messageType == SERVER_FULL_RESPONSE && (flags == SERVER_EVENT_ACK_FLAG || flags == SERVER_EVENT_FINAL_FLAG)) {
+        var event: Int? = null
+        if ((flags and SERVER_SEQUENCE_PRESENT_FLAG) != 0) {
             sequence = bytes.readInt(offset)
             offset += 4
         }
+        if ((flags and SERVER_EVENT_PRESENT_FLAG) != 0) {
+            event = bytes.readInt(offset)
+            offset += 4
+        }
+        val isLast = (flags and SERVER_LAST_PACKET_FLAG) != 0
 
         val payloadText = when (messageType) {
             SERVER_ERROR_RESPONSE -> {
@@ -547,6 +632,8 @@ class DoubaoSpeechDebugProbe(
             messageType = messageType,
             flags = flags,
             sequence = sequence,
+            event = event,
+            isLast = isLast,
             payloadText = payloadText,
             payloadPreview = payloadText.take(MAX_PAYLOAD_PREVIEW),
         )
@@ -668,12 +755,13 @@ class DoubaoSpeechDebugProbe(
         private const val HEADER_WORD_SIZE = 1
         private const val CLIENT_FULL_REQUEST = 1
         private const val CLIENT_AUDIO_ONLY_REQUEST = 2
-        private const val CLIENT_AUDIO_FINAL_FLAG = 2
+        private const val CLIENT_POS_SEQUENCE_FLAG = 1
+        private const val CLIENT_NEGATIVE_SEQUENCE_FLAG = 3
         private const val SERVER_FULL_RESPONSE = 9
         private const val SERVER_ERROR_RESPONSE = 15
-        private const val SERVER_EVENT_ACK_FLAG = 1
-        private const val SERVER_EVENT_FINAL_FLAG = 3
-        private const val SERIALIZATION_NONE = 0
+        private const val SERVER_SEQUENCE_PRESENT_FLAG = 1
+        private const val SERVER_LAST_PACKET_FLAG = 2
+        private const val SERVER_EVENT_PRESENT_FLAG = 4
         private const val SERIALIZATION_JSON = 1
         private const val COMPRESSION_GZIP = 1
         private const val PCM_BYTES_PER_200MS = 6_400

@@ -282,7 +282,10 @@ class DoubaoSpeechRecognizer(
 
     private fun buildSpeechRequestParamsJson(): String {
         return JSONObject()
+            .put("model_name", "bigmodel")
             .put("enable_itn", true)
+            .put("enable_punc", true)
+            .put("enable_ddc", true)
             .put("end_window_size", 800)
             .put("force_to_speech_time", 0)
             .toString()
