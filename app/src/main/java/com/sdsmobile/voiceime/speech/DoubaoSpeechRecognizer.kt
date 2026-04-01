@@ -282,7 +282,7 @@ class DoubaoSpeechRecognizer(
                 val text = runCatching { file.readText() }.getOrElse { error ->
                     "读取失败: ${error.message}"
                 }
-                append(text.lineSequence().takeLast(40).joinToString("\n").ifBlank { "(空文件)" })
+                append(text.lines().takeLast(40).joinToString("\n").ifBlank { "(空文件)" })
                 append("\n")
             }
         }.trim()
