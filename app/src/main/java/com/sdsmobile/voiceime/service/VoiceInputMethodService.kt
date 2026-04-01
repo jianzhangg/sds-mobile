@@ -63,6 +63,7 @@ class VoiceInputMethodService : InputMethodService() {
     private var hasMovedDuringTouch = false
     private var hasLongPressed = false
     private val touchSlop by lazy { ViewConfiguration.get(this).scaledTouchSlop.toFloat() }
+    private val dragStartSlop by lazy { touchSlop * 2.5f }
     private val longPressRunnable = Runnable {
         if (!hasMovedDuringTouch) {
             hasLongPressed = true
@@ -130,7 +131,7 @@ class VoiceInputMethodService : InputMethodService() {
             MotionEvent.ACTION_MOVE -> {
                 val deltaX = event.rawX - touchStartRawX
                 val deltaY = event.rawY - touchStartRawY
-                if (!hasMovedDuringTouch && (abs(deltaX) > touchSlop || abs(deltaY) > touchSlop)) {
+                if (!hasMovedDuringTouch && (abs(deltaX) > dragStartSlop || abs(deltaY) > dragStartSlop)) {
                     hasMovedDuringTouch = true
                     mainHandler.removeCallbacks(longPressRunnable)
                 }
@@ -294,10 +295,12 @@ class VoiceInputMethodService : InputMethodService() {
         if (extracted?.text != null) {
             val text = extracted.text.toString()
             if (text.isNotBlank()) {
+                val selectionStart = extracted.selectionStart.coerceIn(0, text.length)
+                val selectionEnd = extracted.selectionEnd.coerceIn(0, text.length)
                 return EditorSnapshot(
                     text = text,
-                    selectionStart = 0,
-                    selectionEnd = text.length,
+                    selectionStart = minOf(selectionStart, selectionEnd),
+                    selectionEnd = maxOf(selectionStart, selectionEnd),
                 )
             }
         }
@@ -325,16 +328,74 @@ class VoiceInputMethodService : InputMethodService() {
         connection ?: return false
         connection.beginBatchEdit()
         return try {
-            val selectionSet = connection.setSelection(snapshot.selectionStart, snapshot.selectionEnd)
-            val selectedAll = if (snapshot.selectionStart == 0 && snapshot.selectionEnd == snapshot.text.length) {
-                selectionSet
-            } else {
-                connection.setSelection(0, snapshot.text.length)
+            connection.finishComposingText()
+
+            if (tryReplaceViaSelectAll(connection, corrected)) {
+                return true
             }
-            selectedAll && connection.commitText(corrected, 1)
+
+            if (tryReplaceViaExplicitSelection(connection, snapshot.text.length, corrected)) {
+                return true
+            }
+
+            if (tryReplaceViaDeleteFromEnd(connection, snapshot.text.length, corrected)) {
+                return true
+            }
+
+            if (tryReplaceViaDeleteFromStart(connection, snapshot.text.length, corrected)) {
+                return true
+            }
+
+            false
         } finally {
             connection.endBatchEdit()
         }
+    }
+
+    private fun tryReplaceViaSelectAll(
+        connection: InputConnection,
+        corrected: String,
+    ): Boolean {
+        return connection.performContextMenuAction(android.R.id.selectAll) &&
+            connection.commitText(corrected, 1)
+    }
+
+    private fun tryReplaceViaExplicitSelection(
+        connection: InputConnection,
+        textLength: Int,
+        corrected: String,
+    ): Boolean {
+        if (textLength <= 0) {
+            return connection.commitText(corrected, 1)
+        }
+        return connection.setSelection(0, textLength) &&
+            connection.commitText(corrected, 1)
+    }
+
+    private fun tryReplaceViaDeleteFromEnd(
+        connection: InputConnection,
+        textLength: Int,
+        corrected: String,
+    ): Boolean {
+        if (textLength <= 0) {
+            return connection.commitText(corrected, 1)
+        }
+        return connection.setSelection(textLength, textLength) &&
+            connection.deleteSurroundingText(textLength, 0) &&
+            connection.commitText(corrected, 1)
+    }
+
+    private fun tryReplaceViaDeleteFromStart(
+        connection: InputConnection,
+        textLength: Int,
+        corrected: String,
+    ): Boolean {
+        if (textLength <= 0) {
+            return connection.commitText(corrected, 1)
+        }
+        return connection.setSelection(0, 0) &&
+            connection.deleteSurroundingText(0, textLength) &&
+            connection.commitText(corrected, 1)
     }
 
     private fun hasAudioPermission(): Boolean {
