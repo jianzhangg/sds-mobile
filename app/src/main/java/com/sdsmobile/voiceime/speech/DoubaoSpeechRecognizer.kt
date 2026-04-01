@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.provider.Settings
 import com.sdsmobile.voiceime.model.AppSettings
+import java.io.File
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
@@ -17,9 +18,16 @@ class DoubaoSpeechRecognizer(
         fun onPartialText(text: String)
         fun onFinalText(text: String)
         fun onError(message: String)
+        fun onLog(message: String) = Unit
+    }
+
+    sealed interface InputSource {
+        data object Microphone : InputSource
+        data class FileInput(val absolutePath: String) : InputSource
     }
 
     private val appContext = context.applicationContext
+    private val debugLogDir = File(appContext.cacheDir, "speech-sdk-logs").apply { mkdirs() }
     private var engine: Any? = null
     private var engineHandle: Long? = null
     private var listenerProxy: Any? = null
@@ -28,6 +36,14 @@ class DoubaoSpeechRecognizer(
     private val generatorClass = Class.forName("com.bytedance.speech.speechengine.SpeechEngineGenerator")
 
     fun startListening(settings: AppSettings, callback: Callback) {
+        startListening(settings, InputSource.Microphone, callback)
+    }
+
+    fun startListeningFromFile(settings: AppSettings, audioFilePath: String, callback: Callback) {
+        startListening(settings, InputSource.FileInput(audioFilePath), callback)
+    }
+
+    private fun startListening(settings: AppSettings, inputSource: InputSource, callback: Callback) {
         prepareEnvironment()
         destroy()
 
@@ -36,11 +52,12 @@ class DoubaoSpeechRecognizer(
         engineHandle = createEngine(engineInstance)
 
         setContextIfSupported(engineInstance)
-        configureEngine(engineInstance, settings)
+        configureEngine(engineInstance, settings, inputSource, callback)
         val initResult = callEngineInt(engineInstance, "initEngine")
         if (initResult != readIntConstant("ERR_NO_ERROR", 0)) {
             throw IllegalStateException("Init engine failed: $initResult")
         }
+        callback.onLog("initEngine 成功，source=${inputSource.describe()}")
 
         listenerProxy = createListenerProxy(engineInstance, callback)
         invokeSetListener(engineInstance, listenerProxy!!)
@@ -107,11 +124,30 @@ class DoubaoSpeechRecognizer(
         method.invoke(engineInstance, appContext)
     }
 
-    private fun configureEngine(engineInstance: Any, settings: AppSettings) {
+    private fun configureEngine(
+        engineInstance: Any,
+        settings: AppSettings,
+        inputSource: InputSource,
+        callback: Callback,
+    ) {
         setStringOption(engineInstance, "PARAMS_KEY_ENGINE_NAME_STRING", readStringConstant("ASR_ENGINE"))
         setStringOption(engineInstance, "PARAMS_KEY_UID_STRING", resolveUid())
-        setStringOption(engineInstance, "PARAMS_KEY_LOG_LEVEL_STRING", readStringConstant("LOG_LEVEL_WARN"))
-        setStringOption(engineInstance, "PARAMS_KEY_RECORDER_TYPE_STRING", readStringConstant("RECORDER_TYPE_RECORDER"))
+        setStringOption(
+            engineInstance,
+            "PARAMS_KEY_LOG_LEVEL_STRING",
+            readStringConstant("LOG_LEVEL_TRACE").ifBlank { readStringConstant("LOG_LEVEL_WARN") },
+        )
+        setStringOption(engineInstance, "PARAMS_KEY_DEBUG_PATH_STRING", debugLogDir.absolutePath)
+        when (inputSource) {
+            InputSource.Microphone -> {
+                setStringOption(engineInstance, "PARAMS_KEY_RECORDER_TYPE_STRING", readStringConstant("RECORDER_TYPE_RECORDER"))
+            }
+
+            is InputSource.FileInput -> {
+                setStringOption(engineInstance, "PARAMS_KEY_RECORDER_TYPE_STRING", readStringConstant("RECORDER_TYPE_FILE"))
+                setStringOption(engineInstance, "PARAMS_KEY_RECORDER_FILE_STRING", inputSource.absolutePath)
+            }
+        }
         setBooleanOption(engineInstance, "PARAMS_KEY_ASR_SHOW_NLU_PUNC_BOOL", true)
         setBooleanOption(engineInstance, "PARAMS_KEY_ASR_AUTO_STOP_BOOL", false)
         setStringOption(engineInstance, "PARAMS_KEY_ASR_RESULT_TYPE_STRING", readStringConstant("ASR_RESULT_TYPE_FULL"))
@@ -124,7 +160,7 @@ class DoubaoSpeechRecognizer(
         setStringOption(engineInstance, "PARAMS_KEY_ASR_ADDRESS_STRING", AppSettings.DEFAULT_SPEECH_ADDRESS)
         setStringOption(engineInstance, "PARAMS_KEY_ASR_URI_STRING", AppSettings.DEFAULT_SPEECH_URI)
         setStringOption(engineInstance, "PARAMS_KEY_APP_ID_STRING", AppSettings.DEFAULT_SPEECH_APP_ID)
-        setStringOption(engineInstance, "PARAMS_KEY_APP_TOKEN_STRING", settings.speechToken)
+        setStringOption(engineInstance, "PARAMS_KEY_APP_TOKEN_STRING", normalizeSpeechToken(settings.speechToken))
         setStringOption(
             engineInstance,
             "PARAMS_KEY_RESOURCE_ID_STRING",
@@ -134,6 +170,11 @@ class DoubaoSpeechRecognizer(
             engineInstance,
             "PARAMS_KEY_PROTOCOL_TYPE_INT",
             readIntConstant("PROTOCOL_TYPE_SEED", 2),
+        )
+        callback.onLog(
+            "识别配置: appId=${AppSettings.DEFAULT_SPEECH_APP_ID}, resourceId=${AppSettings.DEFAULT_SPEECH_RESOURCE_ID}, " +
+                "uri=${AppSettings.DEFAULT_SPEECH_URI}, source=${inputSource.describe()}, tokenLength=${normalizeSpeechToken(settings.speechToken).length}, " +
+                "debugPath=${debugLogDir.absolutePath}",
         )
     }
 
@@ -167,20 +208,32 @@ class DoubaoSpeechRecognizer(
         val payload = raw.copyOfRange(0, len).toString(Charsets.UTF_8)
 
         when (type) {
-            readIntConstant("MESSAGE_TYPE_ENGINE_START", -1) -> postToMain { callback.onReady() }
+            readIntConstant("MESSAGE_TYPE_ENGINE_START", -1) -> postToMain {
+                callback.onLog("engine_start")
+                callback.onReady()
+            }
             readIntConstant("MESSAGE_TYPE_PARTIAL_RESULT", -1) -> {
                 val text = extractText(payload)
                 if (text.isNotBlank()) {
-                    postToMain { callback.onPartialText(text) }
+                    postToMain {
+                        callback.onLog("partial=$text")
+                        callback.onPartialText(text)
+                    }
                 }
             }
             readIntConstant("MESSAGE_TYPE_FINAL_RESULT", -1) -> {
                 val text = extractText(payload)
-                postToMain { callback.onFinalText(text) }
+                postToMain {
+                    callback.onLog("final=$text")
+                    callback.onFinalText(text)
+                }
             }
             readIntConstant("MESSAGE_TYPE_ENGINE_ERROR", -1) -> {
                 val message = parseErrorMessage(payload)
-                postToMain { callback.onError(message) }
+                postToMain {
+                    callback.onLog("error_payload=$payload")
+                    callback.onError(message)
+                }
             }
         }
     }
@@ -192,13 +245,47 @@ class DoubaoSpeechRecognizer(
                 .ifBlank { root.optString("message") }
                 .ifBlank { root.optString("error") }
                 .ifBlank { root.optString("status_message") }
-            val code = root.opt("code")?.toString().orEmpty()
+            val code = root.opt("err_code")?.toString()
+                .orEmpty()
+                .ifBlank { root.opt("code")?.toString().orEmpty() }
+            val requestId = root.optString("req_id")
+                .ifBlank { root.optString("request_id") }
             when {
                 message.isBlank() -> payload
-                code.isBlank() -> message
-                else -> "$message ($code)"
+                code.isBlank() && requestId.isBlank() -> message
+                requestId.isBlank() -> "$message (code=$code)"
+                code.isBlank() -> "$message (req_id=$requestId)"
+                else -> "$message (code=$code, req_id=$requestId)"
             }
         }.getOrDefault(payload.ifBlank { "识别失败" })
+    }
+
+    private fun normalizeSpeechToken(token: String): String {
+        return token
+            .trim()
+            .removePrefix("Bearer;")
+            .removePrefix("Bearer ")
+            .trim()
+    }
+
+    fun readDebugLogTail(): String {
+        val files = debugLogDir.listFiles()
+            ?.sortedByDescending { it.lastModified() }
+            ?.take(3)
+            .orEmpty()
+        if (files.isEmpty()) {
+            return ""
+        }
+        return buildString {
+            files.forEach { file ->
+                append("== ${file.name} ==\n")
+                val text = runCatching { file.readText() }.getOrElse { error ->
+                    "读取失败: ${error.message}"
+                }
+                append(text.lineSequence().takeLast(40).joinToString("\n").ifBlank { "(空文件)" })
+                append("\n")
+            }
+        }.trim()
     }
 
     private fun extractText(payload: String): String {
@@ -298,6 +385,13 @@ class DoubaoSpeechRecognizer(
             java.lang.Float.TYPE -> 0f
             java.lang.Double.TYPE -> 0.0
             else -> null
+        }
+    }
+
+    private fun InputSource.describe(): String {
+        return when (this) {
+            InputSource.Microphone -> "microphone"
+            is InputSource.FileInput -> absolutePath
         }
     }
 }

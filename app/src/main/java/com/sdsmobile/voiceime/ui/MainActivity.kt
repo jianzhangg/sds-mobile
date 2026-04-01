@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -168,7 +170,7 @@ private fun MainScreen(viewModel: MainViewModel) {
                 TestingCard(
                     speechTest = uiState.speechTest,
                     llmTest = uiState.llmTest,
-                    onToggleSpeechTest = { viewModel.toggleSpeechTest(audioGranted) },
+                    onRunSpeechTest = viewModel::runSpeechTest,
                     onLlmInputChange = viewModel::updateLlmTestInput,
                     onRunLlmTest = viewModel::runLlmTest,
                 )
@@ -187,6 +189,24 @@ private fun MainScreen(viewModel: MainViewModel) {
                     },
                 )
             }
+        }
+
+        uiState.speechTest.errorDialog?.let { dialogText ->
+            AlertDialog(
+                onDismissRequest = viewModel::dismissSpeechErrorDialog,
+                confirmButton = {
+                    TextButton(onClick = viewModel::dismissSpeechErrorDialog) {
+                        Text("知道了")
+                    }
+                },
+                title = { Text("语音识别测试失败") },
+                text = {
+                    Text(
+                        text = dialogText,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+            )
         }
     }
 }
@@ -254,6 +274,7 @@ private fun SettingsCard(
     settings: AppSettings,
     onUpdate: ((AppSettings) -> AppSettings) -> Unit,
 ) {
+    val context = LocalContext.current
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SectionCard(
             title = "豆包语音",
@@ -264,7 +285,11 @@ private fun SettingsCard(
                 label = "Speech Access Token",
                 value = settings.speechToken,
                 onValueChange = { onUpdate { current -> current.copy(speechToken = it) } },
-                supportingText = "固定使用 App ID 2586725503 和小时版资源 volc.seedasr.sauc.duration，只需要填写控制台里的 Access Token。",
+                supportingText = "固定使用 App ID 2586725503 和小时版资源 volc.seedasr.sauc.duration，只需要填写控制台里的 Access Token，不要加 Bearer 前缀。",
+            )
+            ConsoleGuideRow(
+                label = "去豆包语音控制台查看 Access Token",
+                onClick = { openWebPage(context, SPEECH_CONSOLE_URL) },
             )
         }
 
@@ -278,6 +303,10 @@ private fun SettingsCard(
                 value = settings.arkApiKey,
                 onValueChange = { onUpdate { current -> current.copy(arkApiKey = it) } },
                 supportingText = "在火山方舟控制台 API Key 管理里创建并复制。",
+            )
+            ConsoleGuideRow(
+                label = "去火山方舟 API Key 管理页面",
+                onClick = { openWebPage(context, ARK_API_KEY_CONSOLE_URL) },
             )
             FormField(
                 label = "Ark Model ID",
@@ -315,13 +344,13 @@ private fun SampleEditorCard(
 private fun TestingCard(
     speechTest: SpeechTestUiState,
     llmTest: LlmTestUiState,
-    onToggleSpeechTest: () -> Unit,
+    onRunSpeechTest: () -> Unit,
     onLlmInputChange: (String) -> Unit,
     onRunLlmTest: () -> Unit,
 ) {
     SectionCard(
         title = "连通性测试",
-        subtitle = "这里还是保留独立测试，方便你在切成系统输入法前，先确认豆包语音和 LLM 两条链路都打通。",
+        subtitle = "这里保留独立测试。语音识别测试会直接跑内置 PCM 文件，不依赖现场录音，方便稳定复现问题。",
         icon = Icons.Outlined.Science,
     ) {
         Text(
@@ -334,19 +363,26 @@ private fun TestingCard(
             active = speechTest.isRunning || speechTest.finalText.isNotBlank(),
         )
         Button(
-            onClick = onToggleSpeechTest,
+            onClick = onRunSpeechTest,
             modifier = Modifier.fillMaxWidth(),
+            enabled = !speechTest.isRunning,
         ) {
-            Text(if (speechTest.isRunning) "结束语音识别测试" else "开始语音识别测试")
+            Text(if (speechTest.isRunning) "语音识别测试中" else "开始内置音频识别测试")
         }
         TestResultPanel(
             title = "识别结果",
             lines = listOfNotNull(
+                "参考文本：${AppSettings.DEFAULT_SPEECH_TEST_REFERENCE_TEXT}",
                 speechTest.partialText.takeIf { it.isNotBlank() }?.let { "实时文本：$it" },
                 speechTest.finalText.takeIf { it.isNotBlank() }?.let { "最终文本：$it" },
                 speechTest.error?.let { "错误：$it" },
             ),
-            emptyText = "点开始后会直接录音，结束后在这里显示实时结果和最终结果。",
+            emptyText = "点开始后会直接跑内置 PCM 音频文件，并在这里显示识别结果。",
+        )
+        TestResultPanel(
+            title = "调试日志",
+            lines = speechTest.logs,
+            emptyText = "这里会显示识别配置、阶段日志和 SDK 日志尾部。出错时也会弹窗显示，方便截图排查。",
         )
 
         Text(
@@ -521,6 +557,19 @@ private fun StatusChip(text: String, active: Boolean) {
 }
 
 @Composable
+private fun ConsoleGuideRow(
+    label: String,
+    onClick: () -> Unit,
+) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(label)
+    }
+}
+
+@Composable
 private fun FormField(
     label: String,
     value: String,
@@ -589,6 +638,13 @@ private fun showInputMethodPicker(context: Context) {
     imm?.showInputMethodPicker()
 }
 
+private fun openWebPage(context: Context, url: String) {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    context.startActivity(intent)
+}
+
 private fun isImeEnabled(context: Context): Boolean {
     val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         ?: return false
@@ -606,3 +662,8 @@ private fun isImeSelected(context: Context): Boolean {
     val component = ComponentName(context, VoiceInputMethodService::class.java)
     return currentIme == component.flattenToString() || currentIme == component.flattenToShortString()
 }
+
+private const val SPEECH_CONSOLE_URL =
+    "https://console.volcengine.com/speech/service/10038?AppID=2586725503"
+private const val ARK_API_KEY_CONSOLE_URL =
+    "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?projectName=default"

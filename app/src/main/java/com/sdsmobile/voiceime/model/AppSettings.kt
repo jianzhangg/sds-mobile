@@ -26,5 +26,7 @@ data class AppSettings(
             "你是中文输入法纠错器。请在不改变原意的前提下修正错别字、标点、语气词、数字格式、单位写法、小数点和语音识别导致的同音错误。只输出修正后的最终文本，不要解释。"
         const val DEFAULT_LLM_TEST_INPUT =
             "今天天器不错 明天下五两点开会 记得带和同原件"
+        const val DEFAULT_SPEECH_TEST_REFERENCE_TEXT =
+            "今天天气不错，明天下午两点开会，记得带合同原件。"
     }
 }
