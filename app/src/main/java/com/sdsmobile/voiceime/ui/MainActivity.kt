@@ -208,7 +208,7 @@ private fun MainScreen(viewModel: MainViewModel) {
                         Text("复制内容")
                     }
                 },
-                title = { Text("语音矩阵测试失败") },
+                title = { Text("语音测试失败") },
                 text = {
                     Text(
                         text = dialogText,
@@ -379,7 +379,7 @@ private fun TestingEntryCard(
 ) {
     SectionCard(
         title = "连通性测试",
-        subtitle = "主页这里只保留测试入口。点进去会弹出测试窗，语音参数矩阵和 LLM 结果都在弹窗里查看。",
+        subtitle = "主页这里只保留测试入口。点进去会弹出测试窗，语音 SDK 测试和 LLM 结果都在弹窗里查看。",
         icon = Icons.Outlined.Science,
     ) {
         Button(
@@ -405,27 +405,20 @@ private fun TestingDialogContent(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = "语音识别测试",
+            text = "SDK 语音识别测试",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
         )
         StatusChip(
-            text = buildString {
-                append("状态：")
-                append(speechTest.status)
-                if (speechTest.activeCase.isNotBlank()) {
-                    append(" | ")
-                    append(speechTest.activeCase)
-                }
-            },
-            active = speechTest.isRunning || speechTest.summaryLines.isNotEmpty() || speechTest.finalText.isNotBlank(),
+            text = "状态：${speechTest.status}",
+            active = speechTest.isRunning || speechTest.finalText.isNotBlank(),
         )
         Button(
             onClick = onRunSpeechTest,
             modifier = Modifier.fillMaxWidth(),
             enabled = !speechTest.isRunning,
         ) {
-            Text(if (speechTest.isRunning) "参数矩阵测试中" else "开始语音参数矩阵测试")
+            Text(if (speechTest.isRunning) "SDK 语音测试中" else "开始 SDK 语音测试")
         }
         TextButton(
             onClick = onCopySpeechReport,
@@ -434,21 +427,21 @@ private fun TestingDialogContent(
             Text("复制完整调试内容")
         }
         TestResultPanel(
-            title = "矩阵结果总览",
+            title = "SDK 测试结果",
             lines = listOfNotNull(
-                *speechTest.summaryLines.toTypedArray(),
-                speechTest.finalText.takeIf { it.isNotBlank() }?.let { "最佳结果：$it" },
-                speechTest.error?.takeIf { speechTest.summaryLines.isEmpty() }?.let { "错误：$it" },
+                speechTest.partialText.takeIf { it.isNotBlank() }?.let { "中间结果：$it" },
+                speechTest.finalText.takeIf { it.isNotBlank() }?.let { "识别结果：$it" },
+                speechTest.error?.let { "错误：$it" },
             ),
-            emptyText = "点开始后会用同一份 PCM 音频连续跑多组请求参数，把每组成功/失败、req_id、logid 和识别文本都列出来。",
+            emptyText = "点开始后会用内置 PCM 音频走一次正式的 SDK 识别链路，方便确认当前 Access Token 和内置配置是否可用。",
         )
         TestResultPanel(
-            title = "完整调试面板",
+            title = "SDK 调试日志",
             lines = listOfNotNull(
                 speechTest.debugReport.takeIf { it.isNotBlank() },
                 speechTest.logs.takeIf { it.isNotEmpty() && speechTest.debugReport.isBlank() }?.joinToString("\n"),
             ),
-            emptyText = "这里会显示每个 case 的请求头、首包 JSON、分包日志、服务端原始回包和最终结论。复制后可以直接用来定位问题。",
+            emptyText = "这里会显示 SDK 的初始化日志、识别日志和底层 log tail。复制后可以直接用来定位问题。",
         )
         Text(
             text = "LLM 测试",
@@ -733,27 +726,22 @@ private fun buildSpeechTestReport(speechTest: SpeechTestUiState): String {
         append("状态：")
         append(speechTest.status)
         append("\n")
-        if (speechTest.activeCase.isNotBlank()) {
-            append("当前 Case：")
-            append(speechTest.activeCase)
-            append("\n")
-        }
         append("参考文本：")
         append(AppSettings.DEFAULT_SPEECH_TEST_REFERENCE_TEXT)
         append("\n")
         if (speechTest.finalText.isNotBlank()) {
-            append("最佳结果：")
+            append("识别结果：")
             append(speechTest.finalText)
+            append("\n")
+        }
+        if (speechTest.partialText.isNotBlank()) {
+            append("中间结果：")
+            append(speechTest.partialText)
             append("\n")
         }
         if (!speechTest.error.isNullOrBlank()) {
             append("错误：")
             append(speechTest.error)
-            append("\n")
-        }
-        if (speechTest.summaryLines.isNotEmpty()) {
-            append("矩阵总览：\n")
-            append(speechTest.summaryLines.joinToString("\n"))
             append("\n")
         }
         if (speechTest.logs.isNotEmpty()) {

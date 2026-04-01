@@ -7,7 +7,7 @@ import com.sdsmobile.voiceime.R
 import com.sdsmobile.voiceime.data.AppSettingsRepository
 import com.sdsmobile.voiceime.model.AppSettings
 import com.sdsmobile.voiceime.speech.ArkTextCorrector
-import com.sdsmobile.voiceime.speech.DoubaoSpeechDebugProbe
+import com.sdsmobile.voiceime.speech.DoubaoSpeechRecognizer
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,12 +21,10 @@ import kotlinx.coroutines.launch
 data class SpeechTestUiState(
     val isRunning: Boolean = false,
     val status: String = "未开始",
-    val activeCase: String = "",
     val partialText: String = "",
     val finalText: String = "",
     val error: String? = null,
     val logs: List<String> = emptyList(),
-    val summaryLines: List<String> = emptyList(),
     val debugReport: String = "",
     val errorDialog: String? = null,
 )
@@ -54,7 +52,7 @@ class MainViewModel(
     private val draft = MutableStateFlow(AppSettings())
     private val speechTest = MutableStateFlow(SpeechTestUiState())
     private val llmTest = MutableStateFlow(LlmTestUiState())
-    private val speechDebugProbe = DoubaoSpeechDebugProbe(this.appContext)
+    private val speechRecognizer = DoubaoSpeechRecognizer(this.appContext)
 
     val uiState: StateFlow<MainUiState> = combine(
         draft,
@@ -179,57 +177,101 @@ class MainViewModel(
     private fun startSpeechTest(settings: AppSettings) {
         val sampleFile = ensureSpeechTestAudioFile()
         val initialLogs = listOf(
-            "测试模式: 原生 WebSocket 参数矩阵",
+            "测试模式: SDK 内置音频测试",
             "音频文件: ${sampleFile.absolutePath}",
-            "音频字节数: ${sampleFile.length()}",
             "参考文本: ${AppSettings.DEFAULT_SPEECH_TEST_REFERENCE_TEXT}",
+            "识别接口: ${AppSettings.DEFAULT_SPEECH_URI}",
         )
         speechTest.value = SpeechTestUiState(
             isRunning = true,
-            status = "准备矩阵测试",
+            status = "准备测试",
             logs = initialLogs,
         )
         viewModelScope.launch {
             runCatching {
-                speechDebugProbe.runMatrix(settings, sampleFile) { progress ->
-                    appendSpeechLog(progress)
-                    speechTest.update {
-                        it.copy(
-                            activeCase = progress.substringBefore(":").takeIf { prefix -> prefix.startsWith("A.") || prefix.startsWith("B.") || prefix.startsWith("C.") || prefix.startsWith("D.") || prefix.startsWith("E.") || prefix.startsWith("F.") }
-                                ?: it.activeCase,
-                            status = if (progress.startsWith("CASE ")) progress else it.status,
-                        )
-                    }
-                }
-            }.onSuccess { report ->
-                speechTest.update {
-                    it.copy(
-                        isRunning = false,
-                        status = report.status,
-                        activeCase = "",
-                        finalText = report.bestText,
-                        error = report.error,
-                        logs = report.progressLines,
-                        summaryLines = report.summaryLines,
-                        debugReport = report.fullReport,
-                        errorDialog = report.error?.let { error ->
-                            buildSpeechErrorDialog(
-                                error = error,
-                                logs = report.progressLines,
-                                debugReport = report.fullReport,
+                speechRecognizer.destroy()
+                speechRecognizer.startListeningFromFile(
+                    settings = settings,
+                    audioFilePath = sampleFile.absolutePath,
+                    callback = object : DoubaoSpeechRecognizer.Callback {
+                        override fun onReady() {
+                            if (!speechTest.value.isRunning) return
+                            speechTest.update {
+                                it.copy(
+                                    status = "识别中",
+                                    error = null,
+                                    errorDialog = null,
+                                )
+                            }
+                        }
+
+                        override fun onPartialText(text: String) {
+                            if (!speechTest.value.isRunning) return
+                            speechTest.update {
+                                it.copy(
+                                    status = "识别中",
+                                    partialText = text,
+                                )
+                            }
+                        }
+
+                        override fun onFinalText(text: String) {
+                            if (!speechTest.value.isRunning) return
+                            speechRecognizer.destroy()
+                            val debugReport = buildSpeechDebugReport(
+                                logs = speechTest.value.logs,
+                                sdkLogTail = speechRecognizer.readDebugLogTail(),
                             )
-                        },
-                    )
-                }
+                            speechTest.update {
+                                it.copy(
+                                    isRunning = false,
+                                    status = "识别成功",
+                                    partialText = "",
+                                    finalText = text,
+                                    error = null,
+                                    debugReport = debugReport,
+                                    errorDialog = null,
+                                )
+                            }
+                        }
+
+                        override fun onError(message: String) {
+                            if (!speechTest.value.isRunning) return
+                            speechRecognizer.destroy()
+                            val currentLogs = speechTest.value.logs
+                            val debugReport = buildSpeechDebugReport(
+                                logs = currentLogs,
+                                sdkLogTail = speechRecognizer.readDebugLogTail(),
+                            )
+                            speechTest.update {
+                                it.copy(
+                                    isRunning = false,
+                                    status = "识别失败",
+                                    partialText = "",
+                                    error = message,
+                                    debugReport = debugReport,
+                                    errorDialog = buildSpeechErrorDialog(
+                                        error = message,
+                                        logs = currentLogs,
+                                        debugReport = debugReport,
+                                    ),
+                                )
+                            }
+                        }
+
+                        override fun onLog(message: String) {
+                            appendSpeechLog(message)
+                        }
+                    },
+                )
             }.onFailure { error ->
                 speechTest.update {
                     it.copy(
                         isRunning = false,
-                        status = "矩阵启动失败",
-                        activeCase = "",
-                        error = error.message ?: "无法启动参数矩阵测试",
+                        status = "测试启动失败",
+                        error = error.message ?: "无法启动 SDK 语音测试",
                         errorDialog = buildSpeechErrorDialog(
-                            error = error.message ?: "无法启动参数矩阵测试",
+                            error = error.message ?: "无法启动 SDK 语音测试",
                             logs = speechTest.value.logs,
                             debugReport = speechTest.value.debugReport,
                         ),
@@ -244,6 +286,26 @@ class MainViewModel(
             val nextLogs = (it.logs + message).takeLast(120)
             it.copy(logs = nextLogs)
         }
+    }
+
+    private fun buildSpeechDebugReport(logs: List<String>, sdkLogTail: String): String {
+        return buildString {
+            append("豆包语音 SDK 测试报告\n\n")
+            append("参考文本：")
+            append(AppSettings.DEFAULT_SPEECH_TEST_REFERENCE_TEXT)
+            append("\n\n")
+            if (logs.isNotEmpty()) {
+                append("进度日志：\n")
+                append(logs.joinToString("\n"))
+            }
+            if (sdkLogTail.isNotBlank()) {
+                if (logs.isNotEmpty()) {
+                    append("\n\n")
+                }
+                append("SDK 日志：\n")
+                append(sdkLogTail)
+            }
+        }.trim()
     }
 
     private fun ensureSpeechTestAudioFile(): File {
@@ -274,5 +336,10 @@ class MainViewModel(
                 append(debugReport)
             }
         }
+    }
+
+    override fun onCleared() {
+        speechRecognizer.destroy()
+        super.onCleared()
     }
 }

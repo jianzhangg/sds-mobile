@@ -13,14 +13,14 @@
   - 通过 `InputConnection` 直接向当前输入框提交文本，不依赖 `AccessibilityService`。
 - 豆包语音：
   - 只保留豆包流式语音识别 2.0 这一条接入路径。
-  - 地址固定为 `wss://openspeech.bytedance.com`，URI 固定为 `/api/v3/sauc/bigmodel`，请求参数已内置。
+  - 地址固定为 `wss://openspeech.bytedance.com`，URI 固定为 `/api/v3/sauc/bigmodel_async`，请求参数已内置。
   - 使用官方 Android `SpeechEngine` SDK，并用反射封装，降低 SDK 小版本差异带来的编译风险。
 - 火山方舟纠错：
   - 通过 OpenAI 兼容的 `chat/completions` 接口调用模型。
   - 语音识别结束后的纠错和“修正全文”都走这一条链路。
 - 主页面：
   - 只保留豆包语音和豆包模型最少配置项。
-  - 带两条独立测试：语音识别测试、LLM 测试。
+  - 带两条独立测试：SDK 语音识别测试、LLM 测试。
   - 带一个示例输入框，方便手动验证 IME 是否会自动弹出。
 
 ## 配置项
@@ -36,7 +36,7 @@
 - 语音 App ID：`2586725503`
 - 语音 Resource ID：`volc.seedasr.sauc.duration`
 - 语音地址：`wss://openspeech.bytedance.com`
-- 语音 URI：`/api/v3/sauc/bigmodel`
+- 语音 URI：`/api/v3/sauc/bigmodel_async`
 - 方舟 Base URL：`https://ark.cn-beijing.volces.com/api/v3`
 - 方舟默认 Model ID：`doubao-seed-2-0-pro-260215`
 - 纠错 System Prompt
@@ -46,7 +46,7 @@
 1. 安装 release 页面里的 `sds-mobile-release.apk`。
 2. 打开 App，填上面 3 个字段。
 3. 先在首页测试：
-   - `开始语音识别测试`：测试豆包语音 SDK，结果只显示在当前页面。
+   - `开始 SDK 语音测试`：测试豆包语音 SDK，结果只显示在当前页面。
    - `测试 LLM`：测试豆包模型纠错，结果也只显示在当前页面。
 4. 授予麦克风权限。
 5. 点 `保存配置`。
