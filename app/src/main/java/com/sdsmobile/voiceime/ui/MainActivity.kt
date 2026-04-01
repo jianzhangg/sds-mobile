@@ -208,7 +208,7 @@ private fun MainScreen(viewModel: MainViewModel) {
                         Text("复制内容")
                     }
                 },
-                title = { Text("语音识别测试失败") },
+                title = { Text("语音矩阵测试失败") },
                 text = {
                     Text(
                         text = dialogText,
@@ -379,7 +379,7 @@ private fun TestingEntryCard(
 ) {
     SectionCard(
         title = "连通性测试",
-        subtitle = "主页这里只保留测试入口。点进去会弹出测试窗，语音识别和 LLM 的结果都在弹窗里查看。",
+        subtitle = "主页这里只保留测试入口。点进去会弹出测试窗，语音参数矩阵和 LLM 结果都在弹窗里查看。",
         icon = Icons.Outlined.Science,
     ) {
         Button(
@@ -410,36 +410,45 @@ private fun TestingDialogContent(
             fontWeight = FontWeight.SemiBold,
         )
         StatusChip(
-            text = "状态：${speechTest.status}",
-            active = speechTest.isRunning || speechTest.finalText.isNotBlank(),
+            text = buildString {
+                append("状态：")
+                append(speechTest.status)
+                if (speechTest.activeCase.isNotBlank()) {
+                    append(" | ")
+                    append(speechTest.activeCase)
+                }
+            },
+            active = speechTest.isRunning || speechTest.summaryLines.isNotEmpty() || speechTest.finalText.isNotBlank(),
         )
         Button(
             onClick = onRunSpeechTest,
             modifier = Modifier.fillMaxWidth(),
             enabled = !speechTest.isRunning,
         ) {
-            Text(if (speechTest.isRunning) "语音识别测试中" else "开始内置音频识别测试")
+            Text(if (speechTest.isRunning) "参数矩阵测试中" else "开始语音参数矩阵测试")
         }
         TextButton(
             onClick = onCopySpeechReport,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("复制语音测试内容")
+            Text("复制完整调试内容")
         }
         TestResultPanel(
-            title = "识别结果",
+            title = "矩阵结果总览",
             lines = listOfNotNull(
-                "参考文本：${AppSettings.DEFAULT_SPEECH_TEST_REFERENCE_TEXT}",
-                speechTest.partialText.takeIf { it.isNotBlank() }?.let { "实时文本：$it" },
-                speechTest.finalText.takeIf { it.isNotBlank() }?.let { "最终文本：$it" },
-                speechTest.error?.let { "错误：$it" },
+                *speechTest.summaryLines.toTypedArray(),
+                speechTest.finalText.takeIf { it.isNotBlank() }?.let { "最佳结果：$it" },
+                speechTest.error?.takeIf { speechTest.summaryLines.isEmpty() }?.let { "错误：$it" },
             ),
-            emptyText = "点开始后会直接跑内置 PCM 音频文件，并在这里显示识别结果。",
+            emptyText = "点开始后会用同一份 PCM 音频连续跑多组请求参数，把每组成功/失败、req_id、logid 和识别文本都列出来。",
         )
         TestResultPanel(
-            title = "调试日志",
-            lines = speechTest.logs,
-            emptyText = "这里会显示识别配置、阶段日志和 SDK 日志尾部。出错时也会弹窗显示，方便截图排查。",
+            title = "完整调试面板",
+            lines = listOfNotNull(
+                speechTest.debugReport.takeIf { it.isNotBlank() },
+                speechTest.logs.takeIf { it.isNotEmpty() && speechTest.debugReport.isBlank() }?.joinToString("\n"),
+            ),
+            emptyText = "这里会显示每个 case 的请求头、首包 JSON、分包日志、服务端原始回包和最终结论。复制后可以直接用来定位问题。",
         )
         Text(
             text = "LLM 测试",
@@ -724,16 +733,16 @@ private fun buildSpeechTestReport(speechTest: SpeechTestUiState): String {
         append("状态：")
         append(speechTest.status)
         append("\n")
+        if (speechTest.activeCase.isNotBlank()) {
+            append("当前 Case：")
+            append(speechTest.activeCase)
+            append("\n")
+        }
         append("参考文本：")
         append(AppSettings.DEFAULT_SPEECH_TEST_REFERENCE_TEXT)
         append("\n")
-        if (speechTest.partialText.isNotBlank()) {
-            append("实时文本：")
-            append(speechTest.partialText)
-            append("\n")
-        }
         if (speechTest.finalText.isNotBlank()) {
-            append("最终文本：")
+            append("最佳结果：")
             append(speechTest.finalText)
             append("\n")
         }
@@ -742,9 +751,19 @@ private fun buildSpeechTestReport(speechTest: SpeechTestUiState): String {
             append(speechTest.error)
             append("\n")
         }
+        if (speechTest.summaryLines.isNotEmpty()) {
+            append("矩阵总览：\n")
+            append(speechTest.summaryLines.joinToString("\n"))
+            append("\n")
+        }
         if (speechTest.logs.isNotEmpty()) {
-            append("日志：\n")
+            append("进度日志：\n")
             append(speechTest.logs.joinToString("\n"))
+            append("\n")
+        }
+        if (speechTest.debugReport.isNotBlank()) {
+            append("完整调试报告：\n")
+            append(speechTest.debugReport)
         }
     }.trim()
 }
