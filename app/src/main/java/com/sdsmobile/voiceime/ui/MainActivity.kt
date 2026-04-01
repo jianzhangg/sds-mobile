@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -23,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -364,11 +364,11 @@ private fun ActionCard(
         subtitle = "保存配置后可直接启动悬浮球。启动按钮也会自动保存当前表单。",
         icon = Icons.Outlined.SettingsSuggest,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = onSave, modifier = Modifier.weight(1f)) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
                 Text("保存配置")
             }
-            Button(onClick = onToggleBubble, modifier = Modifier.weight(1f)) {
+            Button(onClick = onToggleBubble, modifier = Modifier.fillMaxWidth()) {
                 Text(if (bubbleRunning) "关闭悬浮球" else "启动悬浮球")
             }
         }
