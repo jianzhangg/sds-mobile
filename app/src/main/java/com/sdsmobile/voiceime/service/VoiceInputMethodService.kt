@@ -375,26 +375,30 @@ class VoiceInputMethodService : InputMethodService() {
 
         when (newState) {
             is ImePanelState.Idle -> {
+                statusView.visibility = View.GONE
                 statusView.text = newState.message
-                bubbleButton.text = "说"
+                bubbleButton.text = ""
                 bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_idle)
             }
 
             is ImePanelState.Listening -> {
+                statusView.visibility = View.VISIBLE
                 statusView.text = "录音中，轻点结束：${newState.label}"
-                bubbleButton.text = "停"
+                bubbleButton.text = ""
                 bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_listening)
             }
 
             is ImePanelState.Processing -> {
+                statusView.visibility = View.VISIBLE
                 statusView.text = newState.label
-                bubbleButton.text = "..."
+                bubbleButton.text = ""
                 bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_processing)
             }
 
             is ImePanelState.Error -> {
+                statusView.visibility = View.VISIBLE
                 statusView.text = "提示：${newState.message}"
-                bubbleButton.text = "说"
+                bubbleButton.text = ""
                 bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_error)
             }
         }

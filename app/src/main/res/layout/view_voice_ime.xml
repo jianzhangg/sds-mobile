@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="220dp"
+    android:layout_height="320dp"
     android:background="@android:color/transparent"
     android:paddingStart="12dp"
     android:paddingTop="8dp"
@@ -30,22 +30,22 @@
             android:paddingBottom="8dp"
             android:text="@string/ime_panel_status_default"
             android:textColor="#3F3A36"
-            android:textSize="13sp" />
+            android:textSize="13sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/ime_bubble_button"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
             android:background="@drawable/bg_voice_ime_bubble_idle"
             android:clickable="true"
+            android:contentDescription="语音输入球"
             android:elevation="10dp"
             android:focusable="true"
             android:gravity="center"
             android:hapticFeedbackEnabled="true"
             android:longClickable="true"
-            android:text="说"
-            android:textColor="#FFFFFF"
-            android:textSize="22sp"
-            android:textStyle="bold" />
+            android:text=""
+            android:textColor="#FFFFFF" />
     </LinearLayout>
 </FrameLayout>

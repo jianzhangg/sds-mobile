@@ -4,10 +4,12 @@ import android.app.Application
 import android.content.Context
 import android.provider.Settings
 import com.sdsmobile.voiceime.model.AppSettings
+import java.io.BufferedInputStream
 import java.io.File
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONObject
 
 class DoubaoSpeechRecognizer(
@@ -31,6 +33,9 @@ class DoubaoSpeechRecognizer(
     private var engine: Any? = null
     private var engineHandle: Long? = null
     private var listenerProxy: Any? = null
+    private var activeInputSource: InputSource? = null
+    private var fileStreamThread: Thread? = null
+    private val hasStartedFileStreaming = AtomicBoolean(false)
     private val mainThreadExecutor = android.os.Handler(appContext.mainLooper)
     private val definesClass = Class.forName("com.bytedance.speech.speechengine.SpeechEngineDefines")
     private val generatorClass = Class.forName("com.bytedance.speech.speechengine.SpeechEngineGenerator")
@@ -46,6 +51,8 @@ class DoubaoSpeechRecognizer(
     private fun startListening(settings: AppSettings, inputSource: InputSource, callback: Callback) {
         prepareEnvironment()
         destroy()
+        activeInputSource = inputSource
+        hasStartedFileStreaming.set(false)
 
         val engineInstance = generatorClass.getMethod("getInstance").invoke(null)
         engine = engineInstance
@@ -75,6 +82,10 @@ class DoubaoSpeechRecognizer(
     }
 
     fun destroy() {
+        fileStreamThread?.interrupt()
+        fileStreamThread = null
+        hasStartedFileStreaming.set(false)
+        activeInputSource = null
         val targetEngine = engine ?: return
         try {
             invokeEngineMethod(targetEngine, "destroyEngine")
@@ -144,13 +155,9 @@ class DoubaoSpeechRecognizer(
             }
 
             is InputSource.FileInput -> {
-                setStringOption(engineInstance, "PARAMS_KEY_RECORDER_TYPE_STRING", readStringConstant("RECORDER_TYPE_FILE"))
-                setStringOption(engineInstance, "PARAMS_KEY_RECORDER_FILE_STRING", inputSource.absolutePath)
+                setStringOption(engineInstance, "PARAMS_KEY_RECORDER_TYPE_STRING", readStringConstant("RECORDER_TYPE_STREAM"))
             }
         }
-        setBooleanOption(engineInstance, "PARAMS_KEY_ASR_SHOW_NLU_PUNC_BOOL", true)
-        setBooleanOption(engineInstance, "PARAMS_KEY_ASR_AUTO_STOP_BOOL", false)
-        setStringOption(engineInstance, "PARAMS_KEY_ASR_RESULT_TYPE_STRING", readStringConstant("ASR_RESULT_TYPE_FULL"))
         setStringOption(
             engineInstance,
             "PARAMS_KEY_ASR_REQ_PARAMS_STRING",
@@ -209,9 +216,12 @@ class DoubaoSpeechRecognizer(
         val payload = raw.copyOfRange(0, len).toString(Charsets.UTF_8)
 
         when (type) {
-            readIntConstant("MESSAGE_TYPE_ENGINE_START", -1) -> postToMain {
-                callback.onLog("engine_start")
-                callback.onReady()
+            readIntConstant("MESSAGE_TYPE_ENGINE_START", -1) -> {
+                maybeStartStreamingFileInput(callback)
+                postToMain {
+                    callback.onLog("engine_start")
+                    callback.onReady()
+                }
             }
             readIntConstant("MESSAGE_TYPE_PARTIAL_RESULT", -1) -> {
                 val text = extractText(payload)
@@ -278,6 +288,55 @@ class DoubaoSpeechRecognizer(
             .toString()
     }
 
+    private fun maybeStartStreamingFileInput(callback: Callback) {
+        val source = activeInputSource as? InputSource.FileInput ?: return
+        val targetEngine = engine ?: return
+        if (!hasStartedFileStreaming.compareAndSet(false, true)) {
+            return
+        }
+        val audioFile = File(source.absolutePath)
+        if (!audioFile.exists()) {
+            postToMain {
+                callback.onError("测试音频不存在：${audioFile.absolutePath}")
+            }
+            return
+        }
+
+        fileStreamThread = Thread({
+            runCatching {
+                postToMain {
+                    callback.onLog("file_stream_mode=pcm_stream_feed")
+                }
+                BufferedInputStream(audioFile.inputStream()).use { input ->
+                    val bytesPerChunk = PCM_BYTES_PER_200_MS
+                    val buffer = ByteArray(bytesPerChunk)
+                    while (!Thread.currentThread().isInterrupted) {
+                        val read = input.read(buffer)
+                        if (read <= 0) {
+                            break
+                        }
+                        val packet = if (read == buffer.size) buffer.copyOf() else buffer.copyOf(read)
+                        val fed = feedAudio(targetEngine, packet, packet.size)
+                        if (!fed) {
+                            throw IllegalStateException("feedAudio 返回失败")
+                        }
+                        Thread.sleep(200L)
+                    }
+                }
+                postToMain {
+                    callback.onLog("file_stream_complete")
+                }
+                finishTalking()
+            }.onFailure { error ->
+                postToMain {
+                    callback.onLog("file_stream_error=${error.message}")
+                    callback.onError(error.message ?: "喂入测试音频失败")
+                }
+            }
+        }, "doubao-file-stream")
+        fileStreamThread?.start()
+    }
+
     fun readDebugLogTail(): String {
         val files = debugLogDir.listFiles()
             ?.sortedByDescending { it.lastModified() }
@@ -326,6 +385,42 @@ class DoubaoSpeechRecognizer(
                 else -> result.toString().trim()
             }
         }.getOrDefault("")
+    }
+
+    private fun feedAudio(engineInstance: Any, audio: ByteArray, length: Int): Boolean {
+        val candidateMethods = engineInstance.javaClass.methods.filter {
+            it.name == "feedAudio" || it.name == "writeAudio" || it.name == "sendAudioData"
+        }
+        if (candidateMethods.isEmpty()) {
+            throw IllegalStateException("SpeechEngine feedAudio method not found")
+        }
+        val argVariants = listOf(
+            arrayOf(audio as Any, length as Any),
+            arrayOf(audio as Any, 0 as Any, length as Any),
+            arrayOf(audio as Any),
+        )
+        val handle = engineHandle
+
+        for (method in candidateMethods) {
+            for (args in argVariants) {
+                val directArgs = if (method.parameterTypes.size == args.size) args else null
+                val handleArgs = if (handle != null && method.parameterTypes.size == args.size + 1) {
+                    arrayOf(handle as Any, *args)
+                } else {
+                    null
+                }
+                val invokeArgs = handleArgs ?: directArgs ?: continue
+                runCatching {
+                    val result = method.invoke(engineInstance, *invokeArgs)
+                    return when (result) {
+                        is Boolean -> result
+                        is Number -> result.toInt() >= 0
+                        else -> true
+                    }
+                }
+            }
+        }
+        throw IllegalStateException("SpeechEngine feedAudio invocation failed")
     }
 
     private fun postToMain(action: () -> Unit) {
@@ -416,7 +511,11 @@ class DoubaoSpeechRecognizer(
     private fun InputSource.describe(): String {
         return when (this) {
             InputSource.Microphone -> "microphone"
-            is InputSource.FileInput -> absolutePath
+            is InputSource.FileInput -> "$absolutePath (stream)"
         }
+    }
+
+    companion object {
+        private const val PCM_BYTES_PER_200_MS = 6_400
     }
 }
