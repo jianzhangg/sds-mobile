@@ -2,18 +2,12 @@ package com.sdsmobile.voiceime.service
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.Color
-import android.graphics.Rect
-import android.graphics.Region
-import android.graphics.drawable.ColorDrawable
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
-import android.view.Window
-import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
@@ -79,25 +73,6 @@ class VoiceInputMethodService : InputMethodService() {
     }
 
     override fun onEvaluateFullscreenMode(): Boolean = false
-
-    override fun onConfigureWindow(win: Window, isFullscreen: Boolean, isCandidatesOnly: Boolean) {
-        super.onConfigureWindow(win, isFullscreen, isCandidatesOnly)
-        win.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        win.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-        win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
-    }
-
-    override fun onComputeInsets(outInsets: Insets) {
-        super.onComputeInsets(outInsets)
-        if (!::rootView.isInitialized || !::bubbleContainer.isInitialized) {
-            return
-        }
-
-        outInsets.contentTopInsets = rootView.height
-        outInsets.visibleTopInsets = rootView.height
-        outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
-        outInsets.touchableRegion.set(buildTouchableRegion())
-    }
 
     override fun onCreateInputView(): View {
         val root = layoutInflater.inflate(R.layout.view_voice_ime, null)
@@ -367,6 +342,7 @@ class VoiceInputMethodService : InputMethodService() {
         if (!::rootView.isInitialized || !::bubbleContainer.isInitialized) {
             return
         }
+        maybeMigrateBubblePosition()
         val availableWidth = (rootView.width - rootView.paddingLeft - rootView.paddingRight - bubbleContainer.width).coerceAtLeast(0)
         val availableHeight = (rootView.height - rootView.paddingTop - rootView.paddingBottom - bubbleContainer.height).coerceAtLeast(0)
         val normalizedX = prefs.getFloat(KEY_BUBBLE_X, 1f)
@@ -389,19 +365,20 @@ class VoiceInputMethodService : InputMethodService() {
         prefs.edit()
             .putFloat(KEY_BUBBLE_X, bubbleTranslationX / availableWidth)
             .putFloat(KEY_BUBBLE_Y, bubbleTranslationY / availableHeight)
+            .putInt(KEY_BUBBLE_LAYOUT_VERSION, BUBBLE_LAYOUT_VERSION)
             .apply()
     }
 
-    private fun buildTouchableRegion(): Region {
-        val location = IntArray(2)
-        bubbleContainer.getLocationInWindow(location)
-        val rect = Rect(
-            location[0],
-            location[1],
-            location[0] + bubbleContainer.width,
-            location[1] + bubbleContainer.height,
-        )
-        return Region(rect)
+    private fun maybeMigrateBubblePosition() {
+        val currentVersion = prefs.getInt(KEY_BUBBLE_LAYOUT_VERSION, 0)
+        if (currentVersion == BUBBLE_LAYOUT_VERSION) {
+            return
+        }
+        prefs.edit()
+            .putFloat(KEY_BUBBLE_X, 1f)
+            .putFloat(KEY_BUBBLE_Y, 1f)
+            .putInt(KEY_BUBBLE_LAYOUT_VERSION, BUBBLE_LAYOUT_VERSION)
+            .apply()
     }
 
     private fun renderState(newState: ImePanelState) {
@@ -463,5 +440,7 @@ class VoiceInputMethodService : InputMethodService() {
         private const val SURROUNDING_TEXT_LIMIT = 2000
         private const val KEY_BUBBLE_X = "bubble_x"
         private const val KEY_BUBBLE_Y = "bubble_y"
+        private const val KEY_BUBBLE_LAYOUT_VERSION = "bubble_layout_version"
+        private const val BUBBLE_LAYOUT_VERSION = 2
     }
 }
