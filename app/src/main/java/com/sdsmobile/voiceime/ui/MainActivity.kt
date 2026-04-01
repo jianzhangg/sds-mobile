@@ -257,20 +257,20 @@ private fun SettingsCard(
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SectionCard(
             title = "豆包语音",
-            subtitle = "按豆包流式语音识别 2.0 接入。App ID 和 Resource ID 已固定，只需要填当前账号的 Access Token。",
+            subtitle = "按豆包流式语音识别 2.0 接入。App ID 和小时版 Resource ID 已固定，只需要填当前账号的 Access Token。",
             icon = Icons.Outlined.GraphicEq,
         ) {
             SecretField(
                 label = "Speech Access Token",
                 value = settings.speechToken,
                 onValueChange = { onUpdate { current -> current.copy(speechToken = it) } },
-                supportingText = "固定使用 App ID 2586725503 和当前 2.0 流式实例，只需要填写控制台里的 Access Token。",
+                supportingText = "固定使用 App ID 2586725503 和小时版资源 volc.seedasr.sauc.duration，只需要填写控制台里的 Access Token。",
             )
         }
 
         SectionCard(
             title = "豆包模型纠错",
-            subtitle = "语音结果提交前会先做一轮纠错；在输入法面板里点“修正全文”会读取当前输入框内容并整体替换。",
+            subtitle = "语音结果提交前会先做一轮纠错；在输入法小球上长按会读取当前输入框内容并整体替换。",
             icon = Icons.Outlined.Tune,
         ) {
             SecretField(

@@ -31,7 +31,7 @@ class ArkTextCorrector {
         return withContext(Dispatchers.IO) {
             requestCorrection(
                 settings = settings,
-                operationPrompt = "请把下面的语音识别文本修正成适合直接输入的最终版本。不要解释。",
+                operationPrompt = "请把下面的语音识别文本修正成适合直接输入的最终版本，尤其注意标点、数字格式、小数点、单位和量词。不要解释。",
                 inputText = text,
             )
         }
@@ -42,7 +42,7 @@ class ArkTextCorrector {
         return withContext(Dispatchers.IO) {
             requestCorrection(
                 settings = settings,
-                operationPrompt = "请修正下面输入框里的现有文本。保持原意，不扩写，只输出修正后的完整文本。",
+                operationPrompt = "请修正下面输入框里的现有文本，重点处理标点、数字格式、小数点、单位和明显的口语化识别错误。保持原意，不扩写，只输出修正后的完整文本。",
                 inputText = text,
             )
         }

@@ -3,13 +3,13 @@
 这是一个 Android 输入法 App，不再走系统悬浮窗和无障碍，而是按真正的 `InputMethodService` 实现：
 
 - 点进任意输入框时，系统会像普通键盘一样自动弹出这个输入法。
-- 输入法面板里点 `开始说话`，会走豆包流式语音识别，再可选调用豆包模型纠错，最后直接写入当前输入框。
-- 点 `修正全文`，会读取当前输入框文本并尝试整体替换成模型修正后的版本。
+- 输入法面板里会出现一个小球，轻点开始说话，再轻点结束录音。
+- 长按这个小球，会读取当前输入框文本并尝试整体替换成模型修正后的版本。
 
 ## 当前实现
 
 - 输入法层：
-  - 使用 `InputMethodService` 承载一个小型语音面板，不需要悬浮窗权限。
+  - 使用 `InputMethodService` 承载一个小型语音球，不需要悬浮窗权限。
   - 通过 `InputConnection` 直接向当前输入框提交文本，不依赖 `AccessibilityService`。
 - 豆包语音：
   - 只保留豆包流式语音识别 2.0 这一条接入路径。
@@ -34,7 +34,7 @@
 这些参数已经固定内置，不需要再填：
 
 - 语音 App ID：`2586725503`
-- 语音 Resource ID：`Doubao_Seed_ASR_Streaming_2.02000000610881820034`
+- 语音 Resource ID：`volc.seedasr.sauc.duration`
 - 语音地址：`wss://openspeech.bytedance.com`
 - 语音 URI：`/api/v3/sauc/bigmodel`
 - 方舟 Base URL：`https://ark.cn-beijing.volces.com/api/v3`
@@ -53,6 +53,7 @@
 6. 进入系统输入法设置，启用“豆包语音输入法”。
 7. 切换当前输入法到“豆包语音输入法”。
 8. 点任意输入框，输入法面板会自动出现。
+9. 轻点小球开始说话，再轻点结束录音；长按小球会修正当前输入框全文。
 
 ## GitHub Actions 打包
 

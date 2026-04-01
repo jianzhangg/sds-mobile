@@ -7,7 +7,6 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
-import android.widget.Button
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import com.sdsmobile.voiceime.R
@@ -28,9 +27,7 @@ class VoiceInputMethodService : InputMethodService() {
     }
 
     private lateinit var statusView: TextView
-    private lateinit var primaryButton: Button
-    private lateinit var correctButton: Button
-    private lateinit var closeButton: Button
+    private lateinit var bubbleButton: TextView
     private var recognizer: DoubaoSpeechRecognizer? = null
     private var state: ImePanelState = ImePanelState.Idle()
 
@@ -52,13 +49,13 @@ class VoiceInputMethodService : InputMethodService() {
     override fun onCreateInputView(): View {
         val root = layoutInflater.inflate(R.layout.view_voice_ime, null)
         statusView = root.findViewById(R.id.ime_status)
-        primaryButton = root.findViewById(R.id.ime_primary_button)
-        correctButton = root.findViewById(R.id.ime_correct_button)
-        closeButton = root.findViewById(R.id.ime_close_button)
+        bubbleButton = root.findViewById(R.id.ime_bubble_button)
 
-        primaryButton.setOnClickListener { onPrimaryAction() }
-        correctButton.setOnClickListener { onCorrectAction() }
-        closeButton.setOnClickListener { requestHideSelf(0) }
+        bubbleButton.setOnClickListener { onPrimaryAction() }
+        bubbleButton.setOnLongClickListener {
+            onBubbleLongPress()
+            true
+        }
 
         renderState(ImePanelState.Idle())
         return root
@@ -84,7 +81,7 @@ class VoiceInputMethodService : InputMethodService() {
     }
 
     private fun onCorrectAction() {
-        if (state !is ImePanelState.Idle) {
+        if (state !is ImePanelState.Idle && state !is ImePanelState.Error) {
             renderState(ImePanelState.Error("请等待当前操作结束"))
             return
         }
@@ -117,6 +114,14 @@ class VoiceInputMethodService : InputMethodService() {
             } else {
                 renderState(ImePanelState.Error("当前输入框不支持整段替换"))
             }
+        }
+    }
+
+    private fun onBubbleLongPress() {
+        when (state) {
+            is ImePanelState.Idle, is ImePanelState.Error -> onCorrectAction()
+            is ImePanelState.Listening -> renderState(ImePanelState.Error("请先轻点结束录音"))
+            is ImePanelState.Processing -> renderState(ImePanelState.Error("正在处理，请稍候"))
         }
     }
 
@@ -259,29 +264,31 @@ class VoiceInputMethodService : InputMethodService() {
         when (newState) {
             is ImePanelState.Idle -> {
                 statusView.text = newState.message
-                primaryButton.text = "开始说话"
+                bubbleButton.text = "说"
+                bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_idle)
             }
 
             is ImePanelState.Listening -> {
-                statusView.text = "识别中：${newState.label}"
-                primaryButton.text = "结束录音"
+                statusView.text = "录音中，轻点结束：${newState.label}"
+                bubbleButton.text = "停"
+                bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_listening)
             }
 
             is ImePanelState.Processing -> {
                 statusView.text = newState.label
-                primaryButton.text = "处理中"
+                bubbleButton.text = "..."
+                bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_processing)
             }
 
             is ImePanelState.Error -> {
                 statusView.text = "提示：${newState.message}"
-                primaryButton.text = "重新开始"
+                bubbleButton.text = "说"
+                bubbleButton.setBackgroundResource(R.drawable.bg_voice_ime_bubble_error)
             }
         }
 
         val busy = newState is ImePanelState.Processing
-        primaryButton.isEnabled = !busy
-        correctButton.isEnabled = newState is ImePanelState.Idle || newState is ImePanelState.Error
-        closeButton.isEnabled = !busy
+        bubbleButton.isEnabled = !busy
     }
 
     private data class EditorSnapshot(
@@ -292,7 +299,7 @@ class VoiceInputMethodService : InputMethodService() {
 
     private sealed interface ImePanelState {
         data class Idle(
-            val message: String = "点“开始说话”输入，点“修正全文”改当前输入框内容。",
+            val message: String = "轻点开始说话，长按修正全文。",
         ) : ImePanelState
         data class Listening(val label: String) : ImePanelState
         data class Processing(val label: String) : ImePanelState

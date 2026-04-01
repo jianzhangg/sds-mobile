@@ -3,68 +3,48 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@android:color/transparent"
-    android:paddingStart="16dp"
-    android:paddingTop="12dp"
-    android:paddingEnd="16dp"
-    android:paddingBottom="12dp">
+    android:paddingStart="12dp"
+    android:paddingTop="8dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="8dp">
 
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="end"
-        android:background="@drawable/bg_voice_ime_panel"
-        android:elevation="10dp"
-        android:gravity="center_vertical"
-        android:orientation="vertical"
-        android:padding="14dp">
-
-        <TextView
-            android:id="@+id/ime_title"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/ime_panel_title"
-            android:textColor="#0F172A"
-            android:textSize="15sp"
-            android:textStyle="bold" />
+        android:layout_gravity="end|bottom"
+        android:gravity="end"
+        android:orientation="vertical">
 
         <TextView
             android:id="@+id/ime_status"
-            android:layout_width="260dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/ime_panel_status_default"
-            android:textColor="#334155"
-            android:textSize="13sp" />
-
-        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:layout_marginBottom="8dp"
+            android:background="@drawable/bg_voice_ime_status"
+            android:elevation="8dp"
+            android:maxWidth="240dp"
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp"
+            android:text="@string/ime_panel_status_default"
+            android:textColor="#3F3A36"
+            android:textSize="13sp" />
 
-            <Button
-                android:id="@+id/ime_primary_button"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
-                android:minWidth="0dp"
-                android:text="@string/ime_panel_action_start" />
-
-            <Button
-                android:id="@+id/ime_correct_button"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
-                android:layout_marginStart="8dp"
-                android:minWidth="0dp"
-                android:text="@string/ime_panel_action_correct" />
-
-            <Button
-                android:id="@+id/ime_close_button"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
-                android:layout_marginStart="8dp"
-                android:minWidth="0dp"
-                android:text="@string/ime_panel_action_close" />
-        </LinearLayout>
+        <TextView
+            android:id="@+id/ime_bubble_button"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:background="@drawable/bg_voice_ime_bubble_idle"
+            android:clickable="true"
+            android:elevation="10dp"
+            android:focusable="true"
+            android:gravity="center"
+            android:hapticFeedbackEnabled="true"
+            android:longClickable="true"
+            android:text="说"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp"
+            android:textStyle="bold" />
     </LinearLayout>
 </FrameLayout>

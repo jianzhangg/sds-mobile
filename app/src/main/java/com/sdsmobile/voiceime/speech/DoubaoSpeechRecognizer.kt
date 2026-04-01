@@ -113,7 +113,7 @@ class DoubaoSpeechRecognizer(
         setStringOption(engineInstance, "PARAMS_KEY_LOG_LEVEL_STRING", readStringConstant("LOG_LEVEL_WARN"))
         setStringOption(engineInstance, "PARAMS_KEY_RECORDER_TYPE_STRING", readStringConstant("RECORDER_TYPE_RECORDER"))
         setBooleanOption(engineInstance, "PARAMS_KEY_ASR_SHOW_NLU_PUNC_BOOL", true)
-        setBooleanOption(engineInstance, "PARAMS_KEY_ASR_AUTO_STOP_BOOL", true)
+        setBooleanOption(engineInstance, "PARAMS_KEY_ASR_AUTO_STOP_BOOL", false)
         setStringOption(engineInstance, "PARAMS_KEY_ASR_RESULT_TYPE_STRING", readStringConstant("ASR_RESULT_TYPE_FULL"))
         setStringOption(
             engineInstance,
@@ -187,7 +187,17 @@ class DoubaoSpeechRecognizer(
 
     private fun parseErrorMessage(payload: String): String {
         return runCatching {
-            JSONObject(payload).optString("err_msg").ifBlank { payload }
+            val root = JSONObject(payload)
+            val message = root.optString("err_msg")
+                .ifBlank { root.optString("message") }
+                .ifBlank { root.optString("error") }
+                .ifBlank { root.optString("status_message") }
+            val code = root.opt("code")?.toString().orEmpty()
+            when {
+                message.isBlank() -> payload
+                code.isBlank() -> message
+                else -> "$message ($code)"
+            }
         }.getOrDefault(payload.ifBlank { "识别失败" })
     }
 
