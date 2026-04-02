@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.view.accessibility.AccessibilityManager
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -43,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -72,6 +75,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.sdsmobile.voiceime.VoiceImeApplication
 import com.sdsmobile.voiceime.model.AppSettings
+import com.sdsmobile.voiceime.service.ScreenContextAccessibilityService
 import com.sdsmobile.voiceime.service.VoiceInputMethodService
 import com.sdsmobile.voiceime.ui.theme.SdsVoiceImeTheme
 import kotlinx.coroutines.launch
@@ -119,6 +123,7 @@ private fun MainScreen(viewModel: MainViewModel) {
     }
     var imeEnabled by rememberSystemSettingState { isImeEnabled(context) }
     var imeSelected by rememberSystemSettingState { isImeSelected(context) }
+    var screenContextEnabled by rememberSystemSettingState { isScreenContextServiceEnabled(context) }
 
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -156,14 +161,18 @@ private fun MainScreen(viewModel: MainViewModel) {
                     audioGranted = audioGranted,
                     imeEnabled = imeEnabled,
                     imeSelected = imeSelected,
+                    screenContextEnabled = screenContextEnabled,
                     onAudioClick = { audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
                     onOpenImeSettings = { openInputMethodSettings(context) },
                     onShowImePicker = { showInputMethodPicker(context) },
+                    onOpenAccessibilitySettings = { openAccessibilitySettings(context) },
                 )
 
                 SettingsCard(
                     settings = uiState.draft,
+                    screenContextServiceEnabled = screenContextEnabled,
                     onUpdate = viewModel::updateDraft,
+                    onOpenAccessibilitySettings = { openAccessibilitySettings(context) },
                 )
 
                 SampleEditorCard(
@@ -258,13 +267,13 @@ private fun HeroCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "豆包语音输入法",
+                text = "语音输入法",
                 style = MaterialTheme.typography.headlineSmall,
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "现在按真正输入法实现。点进任意输入框时，系统会显示一个小型语音输入面板，不需要悬浮窗权限，也不依赖无障碍。",
+                text = "轻点悬浮球开始语音输入，再轻点结束；长按悬浮球会优化当前输入框全文。点击输入默认可直接输出原始识别文本，也可以按开关走一轮大模型文本优化。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFFD1D5DB),
             )
@@ -287,31 +296,36 @@ private fun SetupCard(
     audioGranted: Boolean,
     imeEnabled: Boolean,
     imeSelected: Boolean,
+    screenContextEnabled: Boolean,
     onAudioClick: () -> Unit,
     onOpenImeSettings: () -> Unit,
     onShowImePicker: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
 ) {
     SectionCard(
         title = "启用步骤",
-        subtitle = "这版不再常驻悬浮球。正确流程是启用输入法、切换到本输入法，然后点进输入框自动出现语音面板。",
+        subtitle = "基础使用只需要麦克风和输入法权限。屏幕识别是可选增强，只在你打开“加载屏幕识别（Beta）”时才需要无障碍。",
         icon = Icons.Outlined.Keyboard,
     ) {
         PermissionRow("麦克风权限", audioGranted, onAudioClick)
         PermissionRow("已在系统里启用输入法", imeEnabled, onOpenImeSettings)
         PermissionRow("当前输入法已切换到本 App", imeSelected, onShowImePicker)
+        PermissionRow("屏幕识别（可选）", screenContextEnabled, onOpenAccessibilitySettings)
     }
 }
 
 @Composable
 private fun SettingsCard(
     settings: AppSettings,
+    screenContextServiceEnabled: Boolean,
     onUpdate: ((AppSettings) -> AppSettings) -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
 ) {
     val context = LocalContext.current
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SectionCard(
             title = "豆包语音",
-            subtitle = "按豆包流式语音识别 2.0 接入。App ID 和小时版 Resource ID 已固定，只需要填当前账号的 Access Token。",
+            subtitle = "按豆包流式语音识别 2.0 接入。App ID 和资源 ID 已固定，只需要填写 Access Token。",
             icon = Icons.Outlined.GraphicEq,
         ) {
             SecretField(
@@ -327,8 +341,81 @@ private fun SettingsCard(
         }
 
         SectionCard(
-            title = "豆包模型纠错",
-            subtitle = "语音结果提交前会先做一轮纠错；在输入法小球上长按会读取当前输入框内容并整体替换。",
+            title = "文本优化",
+            subtitle = "“识别后自动文本优化”只控制轻点说话后的后处理；长按悬浮球优化当前输入框全文的功能保持不变。",
+            icon = Icons.Outlined.Tune,
+        ) {
+            SwitchField(
+                label = "识别后自动文本优化",
+                checked = settings.textOptimizationEnabled,
+                supportingText = "打开后，点击悬浮球录入的文本会先经过一轮大模型优化；关闭时直接输出豆包语音识别原文。",
+                onCheckedChange = {
+                    onUpdate { current -> current.copy(textOptimizationEnabled = it) }
+                },
+            )
+            SwitchField(
+                label = "个性化偏好",
+                checked = settings.personalizationEnabled,
+                supportingText = "告诉语音输入法你的表达习惯和偏好。关闭时不会把偏好文本发给模型。",
+                onCheckedChange = {
+                    onUpdate { current -> current.copy(personalizationEnabled = it) }
+                },
+            )
+            FormField(
+                label = "偏好内容",
+                value = settings.personalizationPrompt,
+                onValueChange = { onUpdate { current -> current.copy(personalizationPrompt = it) } },
+                singleLine = false,
+                minLines = 3,
+                supportingText = "例如：更口语一些、不要太正式、会议纪要保留关键动作项。",
+            )
+            SwitchField(
+                label = "自动结构化",
+                checked = settings.autoStructureEnabled,
+                supportingText = "把较长的口述文本整理成更清晰、更干净的句子或段落。",
+                onCheckedChange = {
+                    onUpdate { current -> current.copy(autoStructureEnabled = it) }
+                },
+            )
+            SwitchField(
+                label = "口语过滤",
+                checked = settings.fillerWordFilterEnabled,
+                supportingText = "去掉“嗯、啊、然后、你知道”这类没有必要的口头填充词和重复词。",
+                onCheckedChange = {
+                    onUpdate { current -> current.copy(fillerWordFilterEnabled = it) }
+                },
+            )
+            SwitchField(
+                label = "去除结尾句号",
+                checked = settings.trimTrailingPeriodEnabled,
+                supportingText = "输出结果最后不带句号，更适合聊天和连续输入。",
+                onCheckedChange = {
+                    onUpdate { current -> current.copy(trimTrailingPeriodEnabled = it) }
+                },
+            )
+            SwitchField(
+                label = "加载屏幕识别（Beta）",
+                checked = settings.screenContextEnabled,
+                supportingText = if (screenContextServiceEnabled) {
+                    "已开启屏幕识别权限。开启后，模型会读取当前屏幕可见文本作为上下文参考。"
+                } else {
+                    "未开启屏幕识别权限。打开后需要再去系统里启用无障碍服务。"
+                },
+                onCheckedChange = {
+                    onUpdate { current -> current.copy(screenContextEnabled = it) }
+                },
+            )
+            if (!screenContextServiceEnabled) {
+                ConsoleGuideRow(
+                    label = "去开启屏幕识别权限",
+                    onClick = onOpenAccessibilitySettings,
+                )
+            }
+        }
+
+        SectionCard(
+            title = "豆包模型",
+            subtitle = "只在文本优化打开或长按优化全文时使用，统一通过模型规则和提示词完成文本整理。",
             icon = Icons.Outlined.Tune,
         ) {
             SecretField(
@@ -359,7 +446,7 @@ private fun SampleEditorCard(
 ) {
     SectionCard(
         title = "输入法手测",
-        subtitle = "先把本 App 选成当前输入法，再点下面输入框。系统会像普通键盘一样自动弹出这个输入法面板。",
+        subtitle = "先把本 App 选成当前输入法，再点下面输入框。系统会弹出悬浮语音球，轻点输入，长按优化当前输入框全文。",
         icon = Icons.Outlined.Science,
     ) {
         OutlinedTextField(
@@ -484,7 +571,7 @@ private fun ActionCard(
 ) {
     SectionCard(
         title = "操作",
-        subtitle = "保存后就可以去系统里启用这个输入法。你也可以直接保存并打开输入法切换器。",
+        subtitle = "保存后即可在系统输入法里使用语音输入法。也可以直接保存并打开输入法切换器。",
         icon = Icons.Outlined.Keyboard,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -670,6 +757,40 @@ private fun SecretField(
 }
 
 @Composable
+private fun SwitchField(
+    label: String,
+    checked: Boolean,
+    supportingText: String,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = supportingText,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF64748B),
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
+    }
+}
+
+@Composable
 private fun rememberSystemSettingState(provider: () -> Boolean): androidx.compose.runtime.MutableState<Boolean> {
     val state = remember { mutableStateOf(provider()) }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -689,6 +810,10 @@ private fun rememberSystemSettingState(provider: () -> Boolean): androidx.compos
 
 private fun openInputMethodSettings(context: Context) {
     context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+}
+
+private fun openAccessibilitySettings(context: Context) {
+    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
 }
 
 private fun showInputMethodPicker(context: Context) {
@@ -719,6 +844,18 @@ private fun isImeSelected(context: Context): Boolean {
     ).orEmpty()
     val component = ComponentName(context, VoiceInputMethodService::class.java)
     return currentIme == component.flattenToString() || currentIme == component.flattenToShortString()
+}
+
+private fun isScreenContextServiceEnabled(context: Context): Boolean {
+    val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+        ?: return false
+    val enabledServices = manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)
+    val expectedId = ComponentName(context, ScreenContextAccessibilityService::class.java).flattenToString()
+    return enabledServices.any { info ->
+        info.resolveInfo.serviceInfo?.let { serviceInfo ->
+            "${serviceInfo.packageName}/${serviceInfo.name}" == expectedId
+        } == true
+    }
 }
 
 private fun buildSpeechTestReport(speechTest: SpeechTestUiState): String {

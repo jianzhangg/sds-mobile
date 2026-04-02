@@ -272,18 +272,37 @@ class VoiceInputMethodService : InputMethodService() {
             return
         }
 
-        renderState(ImePanelState.Processing("优化中"))
-        val finalText = if (settings.isCorrectionConfigured()) {
+        val shouldOptimize = settings.textOptimizationEnabled && settings.isCorrectionConfigured()
+        if (shouldOptimize) {
+            renderState(ImePanelState.Processing("优化中"))
+        }
+        val finalText = if (shouldOptimize) {
+            val screenContext = if (settings.screenContextEnabled) {
+                ScreenContextAccessibilityService.latestSnapshot()
+            } else {
+                null
+            }
             runCatching {
-                appContainer.arkTextCorrector.correctDictation(rawText, settings)
-            }.getOrDefault(rawText)
+                appContainer.arkTextCorrector.correctDictation(
+                    text = rawText,
+                    settings = settings,
+                    screenContext = screenContext,
+                )
+            }.getOrElse {
+                rawText
+            }
         } else {
             rawText
         }
 
         val inserted = currentInputConnection?.commitText(finalText, 1) == true
         if (inserted) {
-            renderState(ImePanelState.Idle("已输入"))
+            val idleMessage = when {
+                shouldOptimize -> "已输入"
+                settings.textOptimizationEnabled && !settings.isCorrectionConfigured() -> "未配置文本优化，已直接输入原文"
+                else -> "已输入原文"
+            }
+            renderState(ImePanelState.Idle(idleMessage))
         } else {
             renderState(ImePanelState.Error("未找到可编辑输入框"))
         }

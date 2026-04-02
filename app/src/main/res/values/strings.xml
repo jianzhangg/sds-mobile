@@ -1,4 +1,6 @@
 <resources>
-    <string name="app_name">豆包语音输入法</string>
-    <string name="ime_subtype_label">中文语音输入</string>
+    <string name="app_name">语音输入法</string>
+    <string name="ime_subtype_label">语音输入法</string>
+    <string name="screen_context_service_label">语音输入法屏幕识别</string>
+    <string name="screen_context_service_description">为语音输入法读取当前屏幕可见文本，给文本优化提供上下文参考。</string>
 </resources>
